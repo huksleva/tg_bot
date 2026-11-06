@@ -38,6 +38,14 @@ const SCHEMA = [
      SELECT 'tram', 'Комендантский проспект, метро', '47,55', 0
      WHERE NOT EXISTS (SELECT 1 FROM settings WHERE key = 'stops_seeded')`,
   `INSERT OR IGNORE INTO settings (key, value) VALUES ('stops_seeded', '1')`,
+  // Номера остановок для прогноза (из справочника GTFS): автобус 258 к Плесецкой ул.,
+  // трамваи 47/55 к ул. Шаврова — одна правка, только если номер ещё не задан
+  `UPDATE stops SET orgp_id = 2068 WHERE orgp_id IS NULL AND kind = 'bus' AND routes = '258'
+     AND name = 'Станция метро Комендантский проспект'
+     AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'stops_orgp_v1')`,
+  `UPDATE stops SET orgp_id = 16644 WHERE orgp_id IS NULL AND kind = 'tram' AND routes = '47,55'
+     AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'stops_orgp_v1')`,
+  `INSERT OR IGNORE INTO settings (key, value) VALUES ('stops_orgp_v1', '1')`,
 ];
 
 let schemaReady = false;
