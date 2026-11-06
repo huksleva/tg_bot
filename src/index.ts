@@ -18,27 +18,6 @@ export default {
       return setup(new Ctx(env, url.origin));
     }
 
-    // ВРЕМЕННО: проверка, доступны ли сайты транспорта и расписания из Cloudflare
-    if (url.pathname === "/diag") {
-      const targets = {
-        orgp_realtime: "https://transport.orgp.spb.ru/Portal/transport/internalapi/gtfs/realtime/vehicle?transports=bus&routeIDs=1",
-        orgp_feed: "https://transport.orgp.spb.ru/Portal/transport/internalapi/gtfs/feed.zip",
-        herzen: "https://guide.herzen.spb.ru/schedule/24432/by-dates",
-      };
-      const out: Record<string, string> = { colo: String((request as any).cf?.colo) };
-      await Promise.all(Object.entries(targets).map(async ([k, u]) => {
-        const t = Date.now();
-        try {
-          const r = await fetch(u, { headers: { "User-Agent": "Mozilla/5.0" }, signal: AbortSignal.timeout(15000) });
-          const len = r.body ? (await r.arrayBuffer()).byteLength : 0;
-          out[k] = `${r.status} ${r.headers.get("content-type")} ${len}b ${Date.now() - t}ms`;
-        } catch (e) {
-          out[k] = `ERR ${(e as Error).message} ${Date.now() - t}ms`;
-        }
-      }));
-      return Response.json(out);
-    }
-
     if (request.method !== "POST") {
       return new Response("Отрок Батракан на посту");
     }
