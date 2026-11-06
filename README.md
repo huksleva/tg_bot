@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="design/avatar.jpg" width="160" alt="Отрок Батракан">
+<img src="design/avatar-round.png" width="160" alt="Отрок Батракан">
 
 # Отрок Батракан
 
