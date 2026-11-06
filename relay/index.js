@@ -75,7 +75,29 @@ async function probe() {
       return `${u} -> ОШИБКА ${describe(e)} за ${Date.now() - t} мс`;
     }
   }));
+  lines.push(await certInfo("transport.orgp.spb.ru"));
   return text(200, lines.join("\n"));
+}
+
+/** Кто выдал сертификат сайта и где взять промежуточный (AIA). */
+function certInfo(host) {
+  const tls = require("node:tls");
+  return new Promise((resolve) => {
+    const sock = tls.connect({ host, port: 443, servername: host, rejectUnauthorized: false }, () => {
+      const c = sock.getPeerCertificate(true);
+      const out = [];
+      let cur = c, depth = 0;
+      while (cur && depth < 4) {
+        out.push(`[${depth}] subject=${cur.subject && cur.subject.CN} issuer=${cur.issuer && cur.issuer.CN} O=${cur.issuer && cur.issuer.O} aia=${(cur.infoAccess && JSON.stringify(cur.infoAccess)) || "-"} till=${cur.valid_to}`);
+        if (!cur.issuerCertificate || cur.issuerCertificate === cur) break;
+        cur = cur.issuerCertificate; depth++;
+      }
+      sock.end();
+      resolve("cert:\n" + out.join("\n"));
+    });
+    sock.setTimeout(8000, () => { sock.destroy(); resolve("cert: timeout"); });
+    sock.on("error", (e) => resolve("cert: " + describe(e)));
+  });
 }
 
 /** Запрос к сайту транспорта: сначала HTTPS, при сетевой ошибке — HTTP. */
