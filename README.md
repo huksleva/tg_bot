@@ -129,6 +129,12 @@ wrangler.jsonc    # настройки Worker
 
 Бесплатного лимита Cloud Functions хватает с огромным запасом.
 
+**Автообновление.** Когда в `main` меняется папка `relay/`, GitHub Actions
+(`.github/workflows/relay.yml`) сам выкладывает новую версию функции. Для этого в репозитории
+нужны секреты *Settings → Secrets and variables → Actions*:
+`YC_SA_JSON_CREDENTIALS` — JSON-ключ сервисного аккаунта с ролью `functions.editor`,
+и `RELAY_SECRET` — пароль посредника.
+
 ## Разработка
 
 ```bash

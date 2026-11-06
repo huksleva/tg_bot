@@ -1,0 +1,44 @@
+# Обновляет функцию-посредника в Яндекс.Облаке, когда меняется папка relay/.
+# Нужны секреты репозитория (Settings → Secrets and variables → Actions):
+#   YC_SA_JSON_CREDENTIALS — ключ сервисного аккаунта Яндекс.Облака (JSON целиком)
+#   RELAY_SECRET           — пароль посредника (тот же, что в Cloudflare и .env)
+name: Посредник в Яндекс.Облаке
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "relay/**"
+      - ".github/workflows/relay.yml"
+  workflow_dispatch: # кнопка «Run workflow» для ручного запуска
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      HAS_KEY: ${{ secrets.YC_SA_JSON_CREDENTIALS != '' && secrets.RELAY_SECRET != '' }}
+    steps:
+      - name: Нет секретов — пропускаем
+        if: env.HAS_KEY != 'true'
+        run: echo "::notice::Добавьте секреты YC_SA_JSON_CREDENTIALS и RELAY_SECRET, чтобы включить деплой"
+
+      - uses: actions/checkout@v4
+        if: env.HAS_KEY == 'true'
+
+      - name: Новая версия функции
+        if: env.HAS_KEY == 'true'
+        uses: yc-actions/yc-sls-function@v5
+        with:
+          yc-sa-json-credentials: ${{ secrets.YC_SA_JSON_CREDENTIALS }}
+          folder-id: b1gh37ourhg95m0hf5ii
+          function-name: tg-bot-claudflare
+          runtime: nodejs22
+          entrypoint: index.handler
+          memory: 512Mb
+          execution-timeout: "60"
+          source-root: relay
+          include: |
+            index.js
+            package.json
+          environment: |
+            RELAY_SECRET=${{ secrets.RELAY_SECRET }}
