@@ -1,6 +1,9 @@
+from html import escape
+from pathlib import Path
+
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
+from aiogram.types import FSInputFile, Message
 
 from bot.keyboards import BTN_HELP, main_menu
 
@@ -22,13 +25,29 @@ HELP_TEXT = (
 )
 
 
+WELCOME_IMAGE = Path(__file__).resolve().parent.parent / "assets" / "welcome.png"
+_welcome_file_id: str | None = None  # после первой отправки Telegram отдаёт id — шлём по нему
+
+WELCOME_TEXT = (
+    "Здрав буди, {name}! 🙇\n\n"
+    "Я — <b>Отрок Батракан</b>, твой верный слуга. Молви слово — исполню.\n\n"
+    "📝 Запишу, что велишь, дабы не забылось\n"
+    "⏰ Напомню о деле в урочный час\n"
+    "🎲 Жребий кину, коли сомневаешься\n\n"
+    "Повеление выбирай в меню ниже, а все мои умения — в /help."
+)
+
+
 @router.message(CommandStart())
 async def cmd_start(message: Message) -> None:
-    name = message.from_user.first_name if message.from_user else "друг"
-    await message.answer(
-        f"Привет, {name}! 👋\nЯ твой личный бот. Выбирай раздел в меню ниже или жми /help.",
+    global _welcome_file_id
+    name = escape(message.from_user.first_name) if message.from_user else "господине"
+    sent = await message.answer_photo(
+        photo=_welcome_file_id or FSInputFile(WELCOME_IMAGE),
+        caption=WELCOME_TEXT.format(name=name),
         reply_markup=main_menu,
     )
+    _welcome_file_id = sent.photo[-1].file_id
 
 
 @router.message(Command("help"))
@@ -46,4 +65,4 @@ async def cmd_id(message: Message) -> None:
 
 @router.message()
 async def fallback(message: Message) -> None:
-    await message.answer("Не понял команду 🤔 Посмотри /help")
+    await message.answer("Не уразумел я, господине 🤔 Глянь /help")

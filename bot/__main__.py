@@ -42,6 +42,12 @@ async def main() -> None:
     dp.include_routers(*get_routers())
 
     await bot.set_my_commands(COMMANDS)
+    await bot.set_my_short_description("Отрок Батракан — верный слуга: заметки, напоминания, жребий.")
+    await bot.set_my_description(
+        "Здрав буди! Я — Отрок Батракан, твой верный слуга.\n"
+        "Запишу, что велишь, напомню в урочный час и жребий кину.\n\n"
+        "Жми «Начать», господине."
+    )
     worker = asyncio.create_task(reminder_worker(bot, db))
     try:
         await bot.delete_webhook(drop_pending_updates=True)
