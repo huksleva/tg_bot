@@ -13,7 +13,9 @@
  */
 const zlib = require("node:zlib");
 
-const ORIGIN = "https://transport.orgp.spb.ru";
+// Сайт может быть на сертификате российского УЦ, которому Node.js не доверяет.
+// Тогда пробуем обычный HTTP: данные о транспорте публичные и не секретные.
+const ORIGINS = ["https://transport.orgp.spb.ru", "http://transport.orgp.spb.ru"];
 const ALLOWED_PREFIX = "/Portal/transport/internalapi/";
 const FEED = "/Portal/transport/internalapi/gtfs/feed.zip";
 const MAX_LINES = 2000;
@@ -35,7 +37,7 @@ module.exports.handler = async (event) => {
 
     const path = one("path") || "";
     if (!path.startsWith(ALLOWED_PREFIX)) return text(400, "path must start with " + ALLOWED_PREFIX);
-    const res = await fetch(ORIGIN + path, { signal: AbortSignal.timeout(15000) });
+    const res = await orgpFetch(path, 15000);
     const buf = Buffer.from(await res.arrayBuffer());
     return {
       statusCode: res.status,
@@ -44,7 +46,7 @@ module.exports.handler = async (event) => {
       isBase64Encoded: true,
     };
   } catch (e) {
-    return text(502, "relay error: " + (e && e.message));
+    return text(502, "relay error: " + describe(e));
   }
 };
 
@@ -52,9 +54,29 @@ function text(statusCode, body) {
   return { statusCode, headers: { "Content-Type": "text/plain; charset=utf-8" }, body };
 }
 
+/** Запрос к сайту транспорта: сначала HTTPS, при сетевой ошибке — HTTP. */
+async function orgpFetch(path, timeoutMs) {
+  const errors = [];
+  for (const origin of ORIGINS) {
+    try {
+      return await fetch(origin + path, { signal: AbortSignal.timeout(timeoutMs) });
+    } catch (e) {
+      errors.push(origin.split(":")[0] + ": " + describe(e));
+    }
+  }
+  throw new Error(errors.join("; "));
+}
+
+/** Текст ошибки вместе с её причиной (fetch прячет её в cause). */
+function describe(e) {
+  if (!e) return "unknown";
+  const cause = e.cause ? ` (${e.cause.code || ""} ${e.cause.message || e.cause})` : "";
+  return `${e.message}${cause}`;
+}
+
 async function loadFeed() {
   if (feedCache && Date.now() - feedCache.at < 6 * 3600 * 1000) return feedCache.buf;
-  const res = await fetch(ORIGIN + FEED, { signal: AbortSignal.timeout(60000) });
+  const res = await orgpFetch(FEED, 50000);
   if (!res.ok) throw new Error("feed.zip HTTP " + res.status);
   feedCache = { buf: Buffer.from(await res.arrayBuffer()), at: Date.now() };
   return feedCache.buf;
