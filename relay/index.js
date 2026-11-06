@@ -203,7 +203,7 @@ function describe(e) {
 
 async function loadFeed() {
   if (feedCache && Date.now() - feedCache.at < 6 * 3600 * 1000) return feedCache.buf;
-  const res = await orgpFetch(FEED, 25000, 2);
+  const res = await orgpFetch(FEED, 55000, 1); // большой файл: одна попытка почти на весь лимит функции
   if (res.status !== 200) throw new Error("feed.zip HTTP " + res.status);
   feedCache = { buf: res.body, at: Date.now() };
   return feedCache.buf;
