@@ -22,7 +22,7 @@ jobs:
         if: env.HAS_KEY != 'true'
         run: echo "::notice::Добавьте секреты YC_SA_JSON_CREDENTIALS и RELAY_SECRET, чтобы включить деплой"
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         if: env.HAS_KEY == 'true'
 
       - name: Новая версия функции

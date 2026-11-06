@@ -34,6 +34,7 @@ module.exports.handler = async (event) => {
   const one = (k) => (q[k] && q[k][0]) || (event.queryStringParameters || {})[k];
 
   try {
+    if (one("probe")) return await probe();
     if (one("gtfs")) return await gtfsLookup(one("gtfs"), q.q || [], Number(one("limit")) || MAX_LINES);
 
     const path = one("path") || "";
@@ -53,6 +54,28 @@ module.exports.handler = async (event) => {
 
 function text(statusCode, body) {
   return { statusCode, headers: { "Content-Type": "text/plain; charset=utf-8" }, body };
+}
+
+/** Диагностика: какие адреса доступны из облака (фиксированный список). */
+async function probe() {
+  const targets = [
+    "https://ya.ru/",
+    "https://transport.orgp.spb.ru/",
+    "http://transport.orgp.spb.ru/",
+    "https://spb-transport.gate.petersburg.ru/",
+    "https://petersburg.ru/",
+    "https://guide.herzen.spb.ru/",
+  ];
+  const lines = await Promise.all(targets.map(async (u) => {
+    const t = Date.now();
+    try {
+      const r = await fetch(u, { signal: AbortSignal.timeout(8000), redirect: "manual" });
+      return `${u} -> ${r.status} за ${Date.now() - t} мс`;
+    } catch (e) {
+      return `${u} -> ОШИБКА ${describe(e)} за ${Date.now() - t} мс`;
+    }
+  }));
+  return text(200, lines.join("\n"));
 }
 
 /** Запрос к сайту транспорта: сначала HTTPS, при сетевой ошибке — HTTP. */
