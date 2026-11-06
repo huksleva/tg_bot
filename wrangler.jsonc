@@ -1,0 +1,21 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // Имя должно совпадать с Worker в Cloudflare
+  "name": "my-tg-bot",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+
+  // Картинки для бота: https://my-tg-bot.leonid005xc.workers.dev/welcome.png
+  "assets": { "directory": "./public" },
+
+  // База для заметок и напоминаний. При первом деплое создаётся автоматически.
+  "d1_databases": [{ "binding": "DB", "database_name": "otrok-batrakan" }],
+
+  // Раз в минуту проверяем, не пора ли кому-то напомнить
+  "triggers": { "crons": ["* * * * *"] },
+
+  // Не затирать переменные, заданные в дашборде (ALLOWED_IDS, TZ)
+  "keep_vars": true,
+
+  "observability": { "enabled": true }
+}

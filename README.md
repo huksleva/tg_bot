@@ -1,40 +1,41 @@
-# tg_bot
-Многофункциональный телеграм бот на Python + aiogram 3.
+# Отрок Батракан
 
-## Возможности
-- 📝 **Заметки** — `/note текст`, `/notes` (удаление кнопками)
-- ⏰ **Напоминания** — `/remind 1h30m позвонить маме`, `/reminders`; хранятся в SQLite и переживают перезапуск
-- 🎲 **Развлечения** — кубик, монетка, дартс, `/random 1 100`
-- 🔒 **Личный доступ** — бот отвечает только ID из `ALLOWED_IDS`
+Личный Telegram-бот, верный слуга. Работает на Cloudflare Workers, бесплатно и без своего сервера.
 
-## Запуск
-1. Создай бота у [@BotFather](https://t.me/BotFather) и скопируй токен.
-2. Установи зависимости:
-   ```bash
-   python -m venv .venv
-   source .venv/bin/activate      # Windows: .venv\Scripts\activate
-   pip install -r requirements.txt
-   ```
-3. Скопируй `.env.example` в `.env` и впиши `BOT_TOKEN`.
-4. Запусти:
-   ```bash
-   python -m bot
-   ```
-5. Напиши боту `/id`, впиши свой ID в `ALLOWED_IDS` и перезапусти — теперь бот только твой.
+## Что умеет
+- 📝 **Заметки**: `/note текст`, `/notes`, удаление кнопками
+- ⏰ **Напоминания**: `/remind 1h30m позвонить маме`, `/reminders`
+- 🎲 **Развлечения**: кубик, монетка, дартс, `/random 1 100`
+- 🔒 **Только для своих**: отвечает лишь ID из `ALLOWED_IDS` (если задан)
 
-## Структура
+## Как устроено
+- `src/index.ts` — точка входа: вебхук от Telegram, cron раз в минуту, `/setup`
+- `src/bot.ts` — команды и кнопки
+- `src/db.ts` — база D1 (таблицы создаются сами)
+- `src/texts.ts` — все тексты бота
+- `public/` — картинки, доступны по адресу Worker (`/welcome.png`)
+- `design/` — аватарка и скрипт, которым нарисованы картинки
+
+## Деплой
+Репозиторий подключён к Worker `my-tg-bot` через Workers Builds:
+**каждый push в `main` сам собирает и публикует бота.**
+
+Секреты хранятся только в Cloudflare (Worker → Settings → Variables and Secrets):
+
+| Имя | Что это |
+|---|---|
+| `BOT_TOKEN` | токен от @BotFather (секрет) |
+| `WEBHOOK_SECRET` | пароль вебхука (секрет) |
+| `ALLOWED_IDS` | необязательно: ID через запятую, свой ID покажет `/id` |
+| `TZ` | необязательно: часовой пояс, по умолчанию `Europe/Moscow` |
+
+После первого деплоя (и после смены токена/секрета) откройте один раз:
+`https://my-tg-bot.leonid005xc.workers.dev/setup?secret=<WEBHOOK_SECRET>`
+Это установит вебхук, меню команд и описание бота.
+
+## Локально
+```bash
+npm install
+npm run typecheck
+npx wrangler dev
 ```
-bot/
-├── __main__.py      # точка входа
-├── config.py        # настройки из .env
-├── db.py            # SQLite
-├── keyboards.py     # кнопки
-├── middlewares.py   # ограничение доступа
-└── handlers/        # по файлу на функцию
-    ├── common.py    # /start, /help, /id
-    ├── notes.py
-    ├── reminders.py
-    └── fun.py
-```
-
-Новая функция = новый файл в `handlers/` + строчка в `handlers/__init__.py`.
