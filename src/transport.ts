@@ -17,7 +17,7 @@ export async function orgp(env: Env, path: string): Promise<Response> {
   const url = `${env.RELAY_URL}?path=${encodeURIComponent(path)}`;
   const res = await fetch(url, {
     headers: { "X-Relay-Secret": env.RELAY_SECRET },
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(25000),
   });
   if (!res.ok) throw new Error(`Посредник: HTTP ${res.status}`);
   return res;
