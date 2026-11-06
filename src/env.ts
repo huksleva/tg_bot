@@ -8,6 +8,10 @@ export interface Env {
   ALLOWED_IDS?: string;
   /** Необязательно: часовой пояс для показа времени. По умолчанию Europe/Moscow. */
   TZ?: string;
+  /** Адрес функции-посредника в Яндекс.Облаке (для прогноза транспорта) */
+  RELAY_URL?: string;
+  /** Секрет: пароль посредника */
+  RELAY_SECRET?: string;
   /** Только для тестов: адрес Bot API */
   TELEGRAM_API?: string;
 }

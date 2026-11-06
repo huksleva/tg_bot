@@ -1,5 +1,6 @@
 import type { Env } from "./env";
 import { Store } from "./db";
+import { onHomeCallback, onScheduleCallback, showHome, showSchedule } from "./commute";
 import { BTN, funKb, mainMenu, notesKb, remindersKb } from "./keyboards";
 import { Telegram, escapeHtml, type CallbackQuery, type InlineKeyboard, type Message, type Update } from "./telegram";
 import { HELP, UNKNOWN, WELCOME } from "./texts";
@@ -55,6 +56,8 @@ async function onMessage(ctx: Ctx, msg: Message) {
   // Кнопки главного меню. Знаки перед словом отбрасываем, чтобы работали
   // и старые кнопки со смайликами, оставшиеся у пользователей в чате.
   switch (text.replace(/^[^\p{L}]+/u, "")) {
+    case BTN.home: return showHome(ctx, chatId);
+    case BTN.schedule: return showSchedule(ctx, chatId);
     case BTN.notes: return showNotes(ctx, chatId, userId);
     case BTN.reminders: return showReminders(ctx, chatId);
     case BTN.fun: return void (await ctx.tg.send(chatId, "Выбирай, господине:", funKb));
@@ -65,6 +68,10 @@ async function onMessage(ctx: Ctx, msg: Message) {
   const { cmd, args } = command;
 
   switch (cmd) {
+    case "home":
+      return showHome(ctx, chatId);
+    case "schedule":
+      return showSchedule(ctx, chatId, args === "завтра" || args === "tomorrow" ? 1 : 0);
     case "start": {
       const name = escapeHtml(msg.from?.first_name ?? "господине");
       await ctx.tg.photo(chatId, `${ctx.origin}/welcome.png`, WELCOME(name), mainMenu);
@@ -166,6 +173,18 @@ async function onCallback(ctx: Ctx, cb: CallbackQuery) {
   const msg = cb.message;
   const chatId = msg?.chat.id ?? cb.from.id;
   const userId = cb.from.id;
+
+  if (data.startsWith("sched:")) {
+    if (msg) await onScheduleCallback(ctx, data, chatId, msg.message_id, cb.id);
+    else await ctx.tg.answer(cb.id);
+    return;
+  }
+
+  if (data.startsWith("home:")) {
+    if (msg) await onHomeCallback(ctx, data, chatId, msg.message_id, cb.id);
+    else await ctx.tg.answer(cb.id);
+    return;
+  }
 
   if (data === "note_new") {
     await ctx.store.setState(userId, "note");

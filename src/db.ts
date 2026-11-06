@@ -15,6 +15,9 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS user_state (
      user_id INTEGER PRIMARY KEY,
      state TEXT NOT NULL)`,
+  // Кому присылать сообщение «пора домой» после пар
+  `CREATE TABLE IF NOT EXISTS commute_subs (
+     chat_id INTEGER PRIMARY KEY)`,
   // Служебные значения бота
   `CREATE TABLE IF NOT EXISTS settings (
      key TEXT PRIMARY KEY,
@@ -95,6 +98,24 @@ export class Store {
       .bind(now())
       .all<Reminder>();
     return results;
+  }
+
+  // --- Подписка на сообщение после пар ---
+  async isCommuteSub(chatId: number) {
+    const r = await this.db.prepare("SELECT 1 FROM commute_subs WHERE chat_id = ?").bind(chatId).first();
+    return r !== null;
+  }
+
+  async setCommuteSub(chatId: number, on: boolean) {
+    const sql = on
+      ? "INSERT OR IGNORE INTO commute_subs (chat_id) VALUES (?)"
+      : "DELETE FROM commute_subs WHERE chat_id = ?";
+    await this.db.prepare(sql).bind(chatId).run();
+  }
+
+  async listCommuteSubs() {
+    const { results } = await this.db.prepare("SELECT chat_id FROM commute_subs").all<{ chat_id: number }>();
+    return results.map((r) => r.chat_id);
   }
 
   // --- Служебные настройки ---
