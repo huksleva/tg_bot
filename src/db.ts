@@ -15,6 +15,10 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS user_state (
      user_id INTEGER PRIMARY KEY,
      state TEXT NOT NULL)`,
+  // Служебные значения бота
+  `CREATE TABLE IF NOT EXISTS settings (
+     key TEXT PRIMARY KEY,
+     value TEXT NOT NULL)`,
 ];
 
 let schemaReady = false;
@@ -91,6 +95,22 @@ export class Store {
       .bind(now())
       .all<Reminder>();
     return results;
+  }
+
+  // --- Служебные настройки ---
+  async getSetting(key: string) {
+    const r = await this.db
+      .prepare("SELECT value FROM settings WHERE key = ?")
+      .bind(key)
+      .first<{ value: string }>();
+    return r?.value ?? null;
+  }
+
+  async setSetting(key: string, value: string) {
+    await this.db
+      .prepare("INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)")
+      .bind(key, value)
+      .run();
   }
 
   // --- Состояние диалога ---

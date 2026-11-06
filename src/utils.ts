@@ -27,4 +27,4 @@ export function formatTime(unix: number, tz = "Europe/Moscow", withSeconds = fal
 }
 
 export const randInt = (lo: number, hi: number) => lo + Math.floor(Math.random() * (hi - lo + 1));
-export const coin = () => (Math.random() < 0.5 ? "🦅 Орёл" : "🔘 Решка");
+export const coin = () => (Math.random() < 0.5 ? "Орёл" : "Решка");

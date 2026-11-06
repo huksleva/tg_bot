@@ -2,10 +2,10 @@ import type { InlineKeyboard, ReplyKeyboard } from "./telegram";
 import type { Note, Reminder } from "./db";
 
 export const BTN = {
-  notes: "📝 Заметки",
-  reminders: "⏰ Напоминания",
-  fun: "🎲 Развлечения",
-  help: "❓ Помощь",
+  notes: "Заметки",
+  reminders: "Напоминания",
+  fun: "Развлечения",
+  help: "Помощь",
 } as const;
 
 export const mainMenu: ReplyKeyboard = {
@@ -19,24 +19,24 @@ export const mainMenu: ReplyKeyboard = {
 
 export const notesKb = (notes: Note[]): InlineKeyboard => ({
   inline_keyboard: [
-    ...notes.map((n) => [{ text: `🗑 #${n.id}`, callback_data: `note_del:${n.id}` }]),
-    [{ text: "➕ Новая заметка", callback_data: "note_new" }],
+    ...notes.map((n) => [{ text: `Удалить #${n.id}`, callback_data: `note_del:${n.id}` }]),
+    [{ text: "Новая заметка", callback_data: "note_new" }],
   ],
 });
 
 export const remindersKb = (rems: Reminder[]): InlineKeyboard => ({
-  inline_keyboard: rems.map((r) => [{ text: `❌ #${r.id}`, callback_data: `rem_del:${r.id}` }]),
+  inline_keyboard: rems.map((r) => [{ text: `Отменить #${r.id}`, callback_data: `rem_del:${r.id}` }]),
 });
 
 export const funKb: InlineKeyboard = {
   inline_keyboard: [
     [
-      { text: "🎲 Кубик", callback_data: "fun:dice" },
-      { text: "🪙 Монетка", callback_data: "fun:coin" },
+      { text: "Кубик", callback_data: "fun:dice" },
+      { text: "Монетка", callback_data: "fun:coin" },
     ],
     [
-      { text: "🎯 Дартс", callback_data: "fun:darts" },
-      { text: "🔢 Число 1–100", callback_data: "fun:num" },
+      { text: "Дартс", callback_data: "fun:darts" },
+      { text: "Число 1–100", callback_data: "fun:num" },
     ],
   ],
 };

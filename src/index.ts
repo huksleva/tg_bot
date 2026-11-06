@@ -8,7 +8,8 @@ export default {
   async fetch(request, env, _ctx): Promise<Response> {
     const url = new URL(request.url);
 
-    // Разовая настройка: вебхук, меню команд, описание бота.
+    // Ручная настройка: вебхук, меню команд, описание. Нужна только после смены
+    // токена или секрета — меню и описание бот обновляет сам (см. syncProfile).
     // Открыть в браузере: https://<worker>/setup?secret=<WEBHOOK_SECRET>
     if (url.pathname === "/setup") {
       if (url.searchParams.get("secret") !== env.WEBHOOK_SECRET) {
@@ -18,7 +19,7 @@ export default {
     }
 
     if (request.method !== "POST") {
-      return new Response("Отрок Батракан на посту 🙇");
+      return new Response("Отрок Батракан на посту");
     }
 
     // Принимаем только запросы от Telegram
@@ -39,10 +40,36 @@ export default {
 
   async scheduled(_event, env, _ctx) {
     await ensureSchema(env.DB);
-    const sent = await sendDueReminders(new Ctx(env, ""));
+    const ctx = new Ctx(env, "");
+    const sent = await sendDueReminders(ctx);
     if (sent) console.log(`Отправлено напоминаний: ${sent}`);
+    await syncProfile(ctx);
   },
 } satisfies ExportedHandler<Env>;
+
+let profileSynced = false;
+
+/**
+ * Сам обновляет меню команд и описание бота в Telegram, если они поменялись в коде.
+ * Работает по cron: после деплоя меню обновится в течение минуты, без ручных ссылок.
+ */
+async function syncProfile(ctx: Ctx) {
+  if (profileSynced) return;
+  const wanted = JSON.stringify({ COMMANDS, DESCRIPTION, SHORT_DESCRIPTION });
+  if ((await ctx.store.getSetting("profile")) !== wanted) {
+    try {
+      await ctx.tg.call("setMyCommands", { commands: COMMANDS });
+      await ctx.tg.call("setMyDescription", { description: DESCRIPTION });
+      await ctx.tg.call("setMyShortDescription", { short_description: SHORT_DESCRIPTION });
+      await ctx.store.setSetting("profile", wanted);
+      console.log("Меню команд и описание обновлены");
+    } catch (e) {
+      console.error("Не удалось обновить меню и описание", e);
+      return; // попробуем на следующей минуте
+    }
+  }
+  profileSynced = true;
+}
 
 async function setup(ctx: Ctx): Promise<Response> {
   const steps: [string, Promise<unknown>][] = [
@@ -59,13 +86,13 @@ async function setup(ctx: Ctx): Promise<Response> {
     steps.map(async ([name, p]) => {
       try {
         await p;
-        return `✅ ${name}`;
+        return `OK    ${name}`;
       } catch (e) {
-        return `❌ ${name}: ${(e as Error).message}`;
+        return `ОШИБКА ${name}: ${(e as Error).message}`;
       }
     }),
   );
   await ensureSchema(ctx.env.DB);
-  lines.push("✅ База готова");
+  lines.push("OK    База готова");
   return new Response(lines.join("\n"), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
 }

@@ -48,12 +48,13 @@ async function onMessage(ctx: Ctx, msg: Message) {
   if (!command && (await ctx.store.getState(userId)) === "note") {
     await ctx.store.setState(userId, null);
     const id = await ctx.store.addNote(userId, text);
-    await ctx.tg.send(chatId, `✅ Заметка #${id} записана`);
+    await ctx.tg.send(chatId, `Заметка #${id} записана`);
     return;
   }
 
-  // Кнопки главного меню
-  switch (text) {
+  // Кнопки главного меню. Знаки перед словом отбрасываем, чтобы работали
+  // и старые кнопки со смайликами, оставшиеся у пользователей в чате.
+  switch (text.replace(/^[^\p{L}]+/u, "")) {
     case BTN.notes: return showNotes(ctx, chatId, userId);
     case BTN.reminders: return showReminders(ctx, chatId);
     case BTN.fun: return void (await ctx.tg.send(chatId, "Выбирай, господине:", funKb));
@@ -86,7 +87,7 @@ async function onMessage(ctx: Ctx, msg: Message) {
         return void (await ctx.tg.send(chatId, "Молви, что записать (или /cancel):"));
       }
       const id = await ctx.store.addNote(userId, args);
-      return void (await ctx.tg.send(chatId, `✅ Заметка #${id} записана`));
+      return void (await ctx.tg.send(chatId, `Заметка #${id} записана`));
     }
     case "notes":
       return showNotes(ctx, chatId, userId);
@@ -105,7 +106,7 @@ async function onMessage(ctx: Ctx, msg: Message) {
       const id = await ctx.store.addReminder(chatId, what, fireAt);
       return void (await ctx.tg.send(
         chatId,
-        `⏰ Напоминание #${id} на ${formatTime(fireAt, ctx.tz)}\n<i>Напомню с точностью до минуты</i>`,
+        `Напоминание #${id} на ${formatTime(fireAt, ctx.tz)}\n<i>Напомню с точностью до минуты</i>`,
       ));
     }
     case "reminders":
@@ -121,7 +122,7 @@ async function onMessage(ctx: Ctx, msg: Message) {
         return void (await ctx.tg.send(chatId, "Формат: /random 1 100"));
       }
       const [lo, hi] = nums[0] <= nums[1] ? nums : [nums[1], nums[0]];
-      return void (await ctx.tg.send(chatId, `🔢 ${randInt(lo, hi)}`));
+      return void (await ctx.tg.send(chatId, `Выпало: ${randInt(lo, hi)}`));
     }
   }
 
@@ -136,7 +137,7 @@ async function renderNotes(ctx: Ctx, userId: number): Promise<[string, InlineKey
   const lines = notes.map(
     (n) => `<b>#${n.id}</b> <i>${formatTime(n.created_at, ctx.tz)}</i>\n${escapeHtml(n.text)}`,
   );
-  return ["<b>📝 Твои заметки:</b>\n\n" + lines.join("\n\n"), notesKb(notes)];
+  return ["<b>Твои заметки:</b>\n\n" + lines.join("\n\n"), notesKb(notes)];
 }
 
 async function showNotes(ctx: Ctx, chatId: number, userId: number) {
@@ -150,7 +151,7 @@ async function renderReminders(ctx: Ctx, chatId: number): Promise<[string, Inlin
   const lines = rems.map(
     (r) => `<b>#${r.id}</b> ${formatTime(r.fire_at, ctx.tz)} — ${escapeHtml(r.text)}`,
   );
-  return ["<b>⏰ Напоминания:</b>\n\n" + lines.join("\n"), remindersKb(rems)];
+  return ["<b>Напоминания:</b>\n\n" + lines.join("\n"), remindersKb(rems)];
 }
 
 async function showReminders(ctx: Ctx, chatId: number) {
@@ -199,7 +200,7 @@ async function onCallback(ctx: Ctx, cb: CallbackQuery) {
       case "dice": await ctx.tg.dice(chatId, "🎲"); break;
       case "darts": await ctx.tg.dice(chatId, "🎯"); break;
       case "coin": await ctx.tg.send(chatId, coin()); break;
-      case "num": await ctx.tg.send(chatId, `🔢 ${randInt(1, 100)}`); break;
+      case "num": await ctx.tg.send(chatId, `Выпало: ${randInt(1, 100)}`); break;
     }
     return;
   }
@@ -213,7 +214,7 @@ export async function sendDueReminders(ctx: Ctx) {
   const due = await ctx.store.popDueReminders();
   for (const r of due) {
     try {
-      await ctx.tg.send(r.chat_id, `🔔 <b>Напоминаю, господине:</b>\n${escapeHtml(r.text)}`);
+      await ctx.tg.send(r.chat_id, `<b>Напоминаю, господине:</b>\n${escapeHtml(r.text)}`);
     } catch (e) {
       console.error("Не удалось отправить напоминание", r.id, e);
     }
