@@ -13,8 +13,12 @@ export const HELP =
   "<b>Учёба</b>\n" +
   "/schedule — пары на сегодня (/schedule завтра — на завтра)\n\n" +
   "<b>Дорога домой</b>\n" +
-  "/home — что приедет быстрее: автобус 258 или трамвай 47/55\n" +
-  "  (там же можно включить сообщение через 30 минут после пар)\n\n" +
+  "/home — что приедет быстрее с твоих остановок\n" +
+  "  (там же можно включить сообщение через 30 минут после пар)\n" +
+  "/stops — список остановок\n" +
+  "/addstop — добавить остановку\n" +
+  "/editstop — изменить остановку\n" +
+  "/delstop — удалить остановку\n\n" +
   "<b>Заметки</b>\n" +
   "/note текст — сохранить заметку\n" +
   "/notes — список заметок\n\n" +
@@ -34,6 +38,10 @@ export const COMMANDS = [
   { command: "start", description: "Главное меню" },
   { command: "schedule", description: "Расписание пар на сегодня" },
   { command: "home", description: "Дорога домой: что приедет быстрее" },
+  { command: "stops", description: "Мои остановки" },
+  { command: "addstop", description: "Добавить остановку" },
+  { command: "editstop", description: "Изменить остановку" },
+  { command: "delstop", description: "Удалить остановку" },
   { command: "help", description: "Что умеет бот" },
   { command: "note", description: "Новая заметка" },
   { command: "notes", description: "Мои заметки" },

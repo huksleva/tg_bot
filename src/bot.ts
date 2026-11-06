@@ -1,6 +1,7 @@
 import type { Env } from "./env";
 import { Store } from "./db";
 import { onHomeCallback, onScheduleCallback, showHome, showSchedule } from "./commute";
+import { onStopInput, onStopsCallback, showStops, startAdd, startDelete, startEdit } from "./stops";
 import { BTN, funKb, mainMenu, notesKb, remindersKb } from "./keyboards";
 import { Telegram, escapeHtml, type CallbackQuery, type InlineKeyboard, type Message, type Update } from "./telegram";
 import { HELP, UNKNOWN, WELCOME } from "./texts";
@@ -45,19 +46,27 @@ async function onMessage(ctx: Ctx, msg: Message) {
 
   const command = parseCommand(text);
 
-  // Ждём текст заметки после кнопки «Новая заметка» или пустой /note
-  if (!command && (await ctx.store.getState(userId)) === "note") {
+  // Знаки перед словом отбрасываем, чтобы работали и старые кнопки со смайликами
+  const menuText = text.replace(/^[^\p{L}]+/u, "");
+  const isMenu = (Object.values(BTN) as string[]).includes(menuText);
+
+  // Ответ на вопрос бота (текст заметки, данные остановки). Команды и кнопки меню
+  // ответом не считаются — они прерывают ввод.
+  const state = command || isMenu ? null : await ctx.store.getState(userId);
+  if (state?.startsWith("{") && (await onStopInput(ctx, chatId, userId, state, text))) return;
+  if (state === "note") {
     await ctx.store.setState(userId, null);
     const id = await ctx.store.addNote(userId, text);
     await ctx.tg.send(chatId, `Заметка #${id} записана`);
     return;
   }
 
-  // Кнопки главного меню. Знаки перед словом отбрасываем, чтобы работали
-  // и старые кнопки со смайликами, оставшиеся у пользователей в чате.
-  switch (text.replace(/^[^\p{L}]+/u, "")) {
+  // Кнопки главного меню
+  if (isMenu) await ctx.store.setState(userId, null);
+  switch (menuText) {
     case BTN.home: return showHome(ctx, chatId);
     case BTN.schedule: return showSchedule(ctx, chatId);
+    case BTN.stops: return showStops(ctx, chatId);
     case BTN.notes: return showNotes(ctx, chatId, userId);
     case BTN.reminders: return showReminders(ctx, chatId);
     case BTN.fun: return void (await ctx.tg.send(chatId, "Выбирай, господине:", funKb));
@@ -70,6 +79,14 @@ async function onMessage(ctx: Ctx, msg: Message) {
   switch (cmd) {
     case "home":
       return showHome(ctx, chatId);
+    case "stops":
+      return showStops(ctx, chatId);
+    case "addstop":
+      return startAdd(ctx, chatId);
+    case "editstop":
+      return startEdit(ctx, chatId, args || undefined);
+    case "delstop":
+      return startDelete(ctx, chatId, args || undefined);
     case "schedule":
       return showSchedule(ctx, chatId, args === "завтра" || args === "tomorrow" ? 1 : 0);
     case "start": {
@@ -173,6 +190,12 @@ async function onCallback(ctx: Ctx, cb: CallbackQuery) {
   const msg = cb.message;
   const chatId = msg?.chat.id ?? cb.from.id;
   const userId = cb.from.id;
+
+  if (data.startsWith("stops:")) {
+    if (msg) await onStopsCallback(ctx, data, chatId, userId, msg.message_id, cb.id);
+    else await ctx.tg.answer(cb.id);
+    return;
+  }
 
   if (data.startsWith("sched:")) {
     if (msg) await onScheduleCallback(ctx, data, chatId, msg.message_id, cb.id);

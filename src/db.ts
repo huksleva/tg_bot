@@ -22,6 +22,22 @@ const SCHEMA = [
   `CREATE TABLE IF NOT EXISTS settings (
      key TEXT PRIMARY KEY,
      value TEXT NOT NULL)`,
+  // Остановки для дороги домой. orgp_id — номер остановки у «Организатора перевозок» (для прогноза)
+  `CREATE TABLE IF NOT EXISTS stops (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     kind TEXT NOT NULL,
+     name TEXT NOT NULL,
+     routes TEXT NOT NULL,
+     walk_min INTEGER NOT NULL DEFAULT 0,
+     orgp_id INTEGER)`,
+  // Начальные остановки — один раз, чтобы удалённые не появлялись снова
+  `INSERT INTO stops (kind, name, routes, walk_min)
+     SELECT 'bus', 'Станция метро Комендантский проспект', '258', 0
+     WHERE NOT EXISTS (SELECT 1 FROM settings WHERE key = 'stops_seeded')`,
+  `INSERT INTO stops (kind, name, routes, walk_min)
+     SELECT 'tram', 'Комендантский проспект, метро', '47,55', 0
+     WHERE NOT EXISTS (SELECT 1 FROM settings WHERE key = 'stops_seeded')`,
+  `INSERT OR IGNORE INTO settings (key, value) VALUES ('stops_seeded', '1')`,
 ];
 
 let schemaReady = false;
@@ -36,6 +52,16 @@ export async function ensureSchema(db: D1Database) {
 const now = () => Math.floor(Date.now() / 1000);
 
 export interface Note { id: number; text: string; created_at: number }
+export type StopKind = "bus" | "tram" | "trolley";
+export interface Stop {
+  id: number;
+  kind: StopKind;
+  name: string;
+  routes: string; // «47,55»
+  walk_min: number;
+  orgp_id: number | null;
+}
+export type StopField = "kind" | "name" | "routes" | "walk_min" | "orgp_id";
 export interface Reminder { id: number; chat_id: number; text: string; fire_at: number }
 
 export class Store {
@@ -98,6 +124,37 @@ export class Store {
       .bind(now())
       .all<Reminder>();
     return results;
+  }
+
+  // --- Остановки ---
+  async listStops() {
+    const { results } = await this.db.prepare("SELECT * FROM stops ORDER BY id").all<Stop>();
+    return results;
+  }
+
+  async getStop(id: number) {
+    return this.db.prepare("SELECT * FROM stops WHERE id = ?").bind(id).first<Stop>();
+  }
+
+  async addStop(s: Omit<Stop, "id" | "orgp_id">) {
+    const r = await this.db
+      .prepare("INSERT INTO stops (kind, name, routes, walk_min) VALUES (?, ?, ?, ?) RETURNING id")
+      .bind(s.kind, s.name, s.routes, s.walk_min)
+      .first<{ id: number }>();
+    return r!.id;
+  }
+
+  async updateStop(id: number, field: StopField, value: string | number | null) {
+    // Имя поля — только из фиксированного списка, значение — через bind
+    const allowed: StopField[] = ["kind", "name", "routes", "walk_min", "orgp_id"];
+    if (!allowed.includes(field)) throw new Error("bad field");
+    const r = await this.db.prepare(`UPDATE stops SET ${field} = ? WHERE id = ?`).bind(value, id).run();
+    return r.meta.changes > 0;
+  }
+
+  async deleteStop(id: number) {
+    const r = await this.db.prepare("DELETE FROM stops WHERE id = ?").bind(id).run();
+    return r.meta.changes > 0;
   }
 
   // --- Подписка на сообщение после пар ---

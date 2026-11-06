@@ -86,7 +86,7 @@ export async function runCommute(ctx: Ctx) {
 
 /** Текст с прогнозом транспорта. */
 export async function commuteMessage(ctx: Ctx, header: string) {
-  const forecast = await compareOptions(ctx.env).catch((e) => {
+  const forecast = await compareOptions(ctx).catch((e) => {
     console.error("Прогноз транспорта", e);
     return "Прогноз транспорта сейчас недоступен.";
   });

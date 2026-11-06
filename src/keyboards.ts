@@ -4,6 +4,7 @@ import type { Note, Reminder } from "./db";
 export const BTN = {
   home: "Домой",
   schedule: "Расписание",
+  stops: "Остановки",
   notes: "Заметки",
   reminders: "Напоминания",
   fun: "Развлечения",
@@ -12,7 +13,7 @@ export const BTN = {
 
 export const mainMenu: ReplyKeyboard = {
   keyboard: [
-    [{ text: BTN.home }, { text: BTN.schedule }],
+    [{ text: BTN.home }, { text: BTN.schedule }, { text: BTN.stops }],
     [{ text: BTN.notes }, { text: BTN.reminders }],
     [{ text: BTN.fun }, { text: BTN.help }],
   ],

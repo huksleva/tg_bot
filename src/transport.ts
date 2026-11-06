@@ -1,4 +1,7 @@
+import type { Ctx } from "./bot";
 import type { Env } from "./env";
+import { stopTitle } from "./stops";
+import { escapeHtml } from "./telegram";
 
 /**
  * Прогноз прибытия транспорта Петербурга.
@@ -21,10 +24,13 @@ export async function orgp(env: Env, path: string): Promise<Response> {
 }
 
 /** Сравнивает варианты дороги и возвращает готовый текст. */
-export async function compareOptions(env: Env): Promise<string> {
-  if (!env.RELAY_URL || !env.RELAY_SECRET) {
-    return "Прогноз автобуса 258 и трамваев 47/55 появится, когда заработает посредник в Яндекс.Облаке.";
+export async function compareOptions(ctx: Ctx): Promise<string> {
+  const stops = await ctx.store.listStops();
+  if (!stops.length) return "Остановок нет — добавь их: /addstop";
+  const list = stops.map((s) => `— ${escapeHtml(stopTitle(s))}`).join("\n");
+  if (!ctx.env.RELAY_URL || !ctx.env.RELAY_SECRET) {
+    return `${list}\n\nПрогноз прибытия появится, когда заработает посредник в Яндекс.Облаке.`;
   }
-  // Подключается после настройки посредника: нужны ID остановок и формат прогноза
-  return "Посредник подключён, прогноз транспорта скоро будет.";
+  // Подключается после настройки посредника: нужны номера остановок и формат прогноза
+  return `${list}\n\nПосредник подключён, прогноз транспорта скоро будет.`;
 }
