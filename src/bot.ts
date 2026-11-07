@@ -2,6 +2,7 @@ import type { Env } from "./env";
 import { Store } from "./db";
 import { onHomeCallback, onScheduleCallback, showHome, showSchedule } from "./commute";
 import { onStopInput, onStopsCallback, showStops, startAdd, startDelete, startEdit } from "./stops";
+import { onTiktokCallback, showTiktok } from "./tiktok";
 import { BTN, mainMenu } from "./keyboards";
 import { Telegram, escapeHtml, type CallbackQuery, type Message, type Update } from "./telegram";
 import { HELP, UNKNOWN, WELCOME } from "./texts";
@@ -60,6 +61,7 @@ async function onMessage(ctx: Ctx, msg: Message) {
     case BTN.home: return showHome(ctx, chatId);
     case BTN.schedule: return showSchedule(ctx, chatId);
     case BTN.stops: return showStops(ctx, chatId);
+    case BTN.tiktok: return showTiktok(ctx, chatId);
     case BTN.help: return void (await ctx.tg.send(chatId, HELP, mainMenu));
   }
 
@@ -79,6 +81,8 @@ async function onMessage(ctx: Ctx, msg: Message) {
       return showSchedule(ctx, chatId, args === "завтра" || args === "tomorrow" ? 1 : 0);
     case "stops":
       return showStops(ctx, chatId);
+    case "tiktok":
+      return showTiktok(ctx, chatId);
     case "addstop":
       return startAdd(ctx, chatId);
     case "editstop":
@@ -113,6 +117,9 @@ async function onCallback(ctx: Ctx, cb: CallbackQuery) {
   }
   if (msg && data.startsWith("sched:")) {
     return onScheduleCallback(ctx, data, chatId, msg.message_id, cb.id);
+  }
+  if (msg && data.startsWith("tiktok:")) {
+    return onTiktokCallback(ctx, data, chatId, msg.message_id, cb.id);
   }
   if (msg && data.startsWith("home:")) {
     return onHomeCallback(ctx, data, chatId, msg.message_id, cb.id);

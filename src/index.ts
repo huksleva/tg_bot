@@ -2,6 +2,7 @@ import type { Env } from "./env";
 import { Ctx, handleUpdate } from "./bot";
 import { runCommute } from "./commute";
 import { observeStops } from "./transport";
+import { handleTiktokReport, runTiktok } from "./tiktok";
 import { ensureSchema } from "./db";
 import type { Update } from "./telegram";
 import { COMMANDS, DESCRIPTION, SHORT_DESCRIPTION } from "./texts";
@@ -18,6 +19,23 @@ export default {
         return new Response("Forbidden", { status: 403 });
       }
       return setup(new Ctx(env, url.origin));
+    }
+
+    // Отчёт робота «огонёк в TikTok» с компьютера пользователя (папка tiktok/)
+    if (url.pathname === "/tiktok/report") {
+      if (request.method !== "POST") return new Response("Method Not Allowed", { status: 405 });
+      if (!env.RELAY_SECRET || request.headers.get("X-Report-Secret") !== env.RELAY_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      let body: unknown;
+      try {
+        body = await request.json();
+      } catch {
+        return Response.json({ ok: false, error: "bad json" }, { status: 400 });
+      }
+      await ensureSchema(env.DB);
+      const result = await handleTiktokReport(new Ctx(env, url.origin), body);
+      return Response.json(result, { status: result.ok ? 200 : 400 });
     }
 
     if (request.method !== "POST") {
@@ -46,6 +64,7 @@ export default {
     await syncProfile(ctx);
     await observeStops(ctx).catch((e) => console.error("Наблюдение за остановками", e));
     await runCommute(ctx).catch((e) => console.error("Дорога домой", e));
+    await runTiktok(ctx).catch((e) => console.error("Огонёк", e));
   },
 } satisfies ExportedHandler<Env>;
 

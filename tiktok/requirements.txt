@@ -1,0 +1,9 @@
+# Робот «огонёк в TikTok». Версии закреплены.
+# streak-saver 0.1.15 — код прочитан целиком перед подключением:
+#   cookies хранит только в %APPDATA%\streak_saver, в сеть ходит только на tiktok.com.
+#   sha256 колеса: 8fb9a17a823aa590313ba78da0a74b097a5b44b407b664c04e78a1123099a198
+streak-saver==0.1.15
+playwright==1.64.1
+typer==0.27.3
+rich==15.0.0
+pyautostart==0.1.2

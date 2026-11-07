@@ -7,7 +7,7 @@ export interface Message { message_id: number; from?: User; chat: Chat; text?: s
 export interface CallbackQuery { id: string; from: User; message?: Message; data?: string }
 export interface Update { update_id: number; message?: Message; callback_query?: CallbackQuery }
 
-export type Button = { text: string; callback_data: string };
+export type Button = { text: string; callback_data: string } | { text: string; url: string };
 export type InlineKeyboard = { inline_keyboard: Button[][] };
 export type ReplyKeyboard = {
   keyboard: { text: string }[][];
