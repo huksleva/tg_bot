@@ -1,5 +1,5 @@
 import type { Env } from "./env";
-import { Ctx, handleUpdate, sendDueReminders } from "./bot";
+import { Ctx, handleUpdate } from "./bot";
 import { runCommute } from "./commute";
 import { ensureSchema } from "./db";
 import type { Update } from "./telegram";
@@ -42,8 +42,6 @@ export default {
   async scheduled(_event, env, _ctx) {
     await ensureSchema(env.DB);
     const ctx = new Ctx(env, "");
-    const sent = await sendDueReminders(ctx);
-    if (sent) console.log(`Отправлено напоминаний: ${sent}`);
     await syncProfile(ctx);
     await runCommute(ctx).catch((e) => console.error("Дорога домой", e));
   },

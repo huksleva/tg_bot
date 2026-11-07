@@ -54,10 +54,6 @@ export class Telegram {
     });
   }
 
-  dice(chatId: number, emoji = "🎲") {
-    return this.call("sendDice", { chat_id: chatId, emoji });
-  }
-
   edit(chatId: number, messageId: number, text: string, markup?: InlineKeyboard) {
     return this.call("editMessageText", {
       chat_id: chatId,
