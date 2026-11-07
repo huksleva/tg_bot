@@ -1,6 +1,7 @@
 import type { Env } from "./env";
 import { Ctx, handleUpdate } from "./bot";
 import { runCommute } from "./commute";
+import { observeStops } from "./transport";
 import { ensureSchema } from "./db";
 import type { Update } from "./telegram";
 import { COMMANDS, DESCRIPTION, SHORT_DESCRIPTION } from "./texts";
@@ -43,6 +44,7 @@ export default {
     await ensureSchema(env.DB);
     const ctx = new Ctx(env, "");
     await syncProfile(ctx);
+    await observeStops(ctx).catch((e) => console.error("Наблюдение за остановками", e));
     await runCommute(ctx).catch((e) => console.error("Дорога домой", e));
   },
 } satisfies ExportedHandler<Env>;

@@ -34,7 +34,7 @@ jobs:
           function-name: tg-bot-claudflare
           runtime: nodejs22
           entrypoint: index.handler
-          memory: 512Mb
+          memory: 128Mb
           execution-timeout: "60"
           source-root: relay
           include: |

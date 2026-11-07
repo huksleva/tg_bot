@@ -36,6 +36,14 @@ const SCHEMA = [
   `UPDATE stops SET orgp_id = 16644 WHERE orgp_id IS NULL AND kind = 'tram' AND routes = '47,55'
      AND NOT EXISTS (SELECT 1 FROM settings WHERE key = 'stops_orgp_v1')`,
   `INSERT OR IGNORE INTO settings (key, value) VALUES ('stops_orgp_v1', '1')`,
+  // Фактические прибытия машин на остановки (записывает cron по прогнозу)
+  `CREATE TABLE IF NOT EXISTS arrivals (
+     id INTEGER PRIMARY KEY AUTOINCREMENT,
+     stop INTEGER NOT NULL,
+     route TEXT NOT NULL,
+     at INTEGER NOT NULL,
+     vehicle TEXT)`,
+  `CREATE INDEX IF NOT EXISTS arrivals_stop ON arrivals(stop, route, at)`,
 ];
 
 let schemaReady = false;
@@ -90,6 +98,32 @@ export class Store {
   async deleteStop(id: number) {
     const r = await this.db.prepare("DELETE FROM stops WHERE id = ?").bind(id).run();
     return r.meta.changes > 0;
+  }
+
+  // --- Фактические прибытия ---
+  /** Записывает прибытие, если эту же машину не записали в последние 10 минут. */
+  async addArrival(stop: number, route: string, at: number, vehicle: string) {
+    await this.db
+      .prepare(
+        `INSERT INTO arrivals (stop, route, at, vehicle)
+         SELECT ?1, ?2, ?3, ?4
+         WHERE NOT EXISTS (SELECT 1 FROM arrivals WHERE stop = ?1 AND vehicle = ?4 AND ABS(at - ?3) < 600)`,
+      )
+      .bind(stop, route, at, vehicle)
+      .run();
+  }
+
+  /** Последнее прибытие каждого маршрута на остановку за последние 3 часа. */
+  async lastArrivals(stop: number) {
+    const { results } = await this.db
+      .prepare("SELECT route, MAX(at) AS at FROM arrivals WHERE stop = ? AND at > ? GROUP BY route")
+      .bind(stop, Math.floor(Date.now() / 1000) - 3 * 3600)
+      .all<{ route: string; at: number }>();
+    return new Map(results.map((r) => [r.route, r.at]));
+  }
+
+  async pruneArrivals(before: number) {
+    await this.db.prepare("DELETE FROM arrivals WHERE at < ?").bind(before).run();
   }
 
   // --- Подписка на сообщение после пар ---
