@@ -8,9 +8,6 @@ const SCHEMA = [
   // Кому присылать сообщение «пора домой» после пар
   `CREATE TABLE IF NOT EXISTS commute_subs (
      chat_id INTEGER PRIMARY KEY)`,
-  // Кому напоминать про огонёк в TikTok
-  `CREATE TABLE IF NOT EXISTS tiktok_subs (
-     chat_id INTEGER PRIMARY KEY)`,
   // Служебные значения бота
   `CREATE TABLE IF NOT EXISTS settings (
      key TEXT PRIMARY KEY,
@@ -127,24 +124,6 @@ export class Store {
 
   async pruneArrivals(before: number) {
     await this.db.prepare("DELETE FROM arrivals WHERE at < ?").bind(before).run();
-  }
-
-  // --- Подписка на напоминания про огонёк в TikTok ---
-  async isTiktokSub(chatId: number) {
-    const r = await this.db.prepare("SELECT 1 FROM tiktok_subs WHERE chat_id = ?").bind(chatId).first();
-    return r !== null;
-  }
-
-  async setTiktokSub(chatId: number, on: boolean) {
-    const sql = on
-      ? "INSERT OR IGNORE INTO tiktok_subs (chat_id) VALUES (?)"
-      : "DELETE FROM tiktok_subs WHERE chat_id = ?";
-    await this.db.prepare(sql).bind(chatId).run();
-  }
-
-  async listTiktokSubs() {
-    const { results } = await this.db.prepare("SELECT chat_id FROM tiktok_subs").all<{ chat_id: number }>();
-    return results.map((r) => r.chat_id);
   }
 
   // --- Подписка на сообщение после пар ---

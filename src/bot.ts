@@ -2,7 +2,6 @@ import type { Env } from "./env";
 import { Store } from "./db";
 import { onHomeCallback, onScheduleCallback, showHome, showSchedule } from "./commute";
 import { onStopInput, onStopsCallback, showStops, startAdd, startDelete, startEdit } from "./stops";
-import { onTiktokCallback, onTiktokInput, showTiktok } from "./tiktok";
 import { BTN, mainMenu } from "./keyboards";
 import { Telegram, escapeHtml, type CallbackQuery, type Message, type Update } from "./telegram";
 import { HELP, UNKNOWN, WELCOME } from "./texts";
@@ -49,13 +48,10 @@ async function onMessage(ctx: Ctx, msg: Message) {
   const menuText = text.replace(/^[^\p{L}]+/u, "");
   const isMenu = (Object.values(BTN) as string[]).includes(menuText);
 
-  // Ответ на вопрос бота (данные остановки, ник друга, время). Команды и кнопки меню ответом
+  // Ответ на вопрос бота (данные остановки). Команды и кнопки меню ответом
   // не считаются — они прерывают ввод.
   const state = command || isMenu ? null : await ctx.store.getState(userId);
-  if (state?.startsWith("{")) {
-    if (await onTiktokInput(ctx, chatId, userId, state, text)) return;
-    if (await onStopInput(ctx, chatId, userId, state, text)) return;
-  }
+  if (state?.startsWith("{") && (await onStopInput(ctx, chatId, userId, state, text))) return;
   if (state) await ctx.store.setState(userId, null); // устаревшее состояние (например, от заметок)
 
   // Кнопки главного меню
@@ -64,7 +60,6 @@ async function onMessage(ctx: Ctx, msg: Message) {
     case BTN.home: return showHome(ctx, chatId);
     case BTN.schedule: return showSchedule(ctx, chatId);
     case BTN.stops: return showStops(ctx, chatId);
-    case BTN.tiktok: return showTiktok(ctx, chatId);
     case BTN.help: return void (await ctx.tg.send(chatId, HELP, mainMenu));
   }
 
@@ -84,8 +79,6 @@ async function onMessage(ctx: Ctx, msg: Message) {
       return showSchedule(ctx, chatId, args === "завтра" || args === "tomorrow" ? 1 : 0);
     case "stops":
       return showStops(ctx, chatId);
-    case "tiktok":
-      return showTiktok(ctx, chatId);
     case "addstop":
       return startAdd(ctx, chatId);
     case "editstop":
@@ -121,13 +114,10 @@ async function onCallback(ctx: Ctx, cb: CallbackQuery) {
   if (msg && data.startsWith("sched:")) {
     return onScheduleCallback(ctx, data, chatId, msg.message_id, cb.id);
   }
-  if (msg && data.startsWith("tiktok:")) {
-    return onTiktokCallback(ctx, data, chatId, userId, msg.message_id, cb.id);
-  }
   if (msg && data.startsWith("home:")) {
     return onHomeCallback(ctx, data, chatId, msg.message_id, cb.id);
   }
 
-  // Кнопки из старых сообщений (заметки, развлечения) — просто закрываем «часики»
+  // Кнопки из старых сообщений (заметки, огонёк и т.п.) — просто закрываем «часики»
   await ctx.tg.answer(cb.id);
 }
