@@ -10,8 +10,6 @@ export interface Env {
   RELAY_URL?: string;
   /** Секрет: пароль посредника */
   RELAY_SECRET?: string;
-  /** Необязательно: до какого часа (по Москве) робот TikTok должен отправить сообщение, по умолчанию 20 */
-  TIKTOK_DEADLINE_HOUR?: string;
   /** Только для тестов: адрес Bot API */
   TELEGRAM_API?: string;
 }

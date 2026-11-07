@@ -5,6 +5,3 @@ node_modules/
 __pycache__/
 feed.zip
 gtfs/
-tiktok/.venv/
-tiktok/robot.log
-tiktok/state.json

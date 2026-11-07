@@ -2,7 +2,7 @@ import type { Env } from "./env";
 import { Store } from "./db";
 import { onHomeCallback, onScheduleCallback, showHome, showSchedule } from "./commute";
 import { onStopInput, onStopsCallback, showStops, startAdd, startDelete, startEdit } from "./stops";
-import { onTiktokCallback, showTiktok } from "./tiktok";
+import { onTiktokCallback, onTiktokInput, showTiktok } from "./tiktok";
 import { BTN, mainMenu } from "./keyboards";
 import { Telegram, escapeHtml, type CallbackQuery, type Message, type Update } from "./telegram";
 import { HELP, UNKNOWN, WELCOME } from "./texts";
@@ -49,10 +49,13 @@ async function onMessage(ctx: Ctx, msg: Message) {
   const menuText = text.replace(/^[^\p{L}]+/u, "");
   const isMenu = (Object.values(BTN) as string[]).includes(menuText);
 
-  // Ответ на вопрос бота (данные остановки). Команды и кнопки меню ответом
+  // Ответ на вопрос бота (данные остановки, ник друга, время). Команды и кнопки меню ответом
   // не считаются — они прерывают ввод.
   const state = command || isMenu ? null : await ctx.store.getState(userId);
-  if (state?.startsWith("{") && (await onStopInput(ctx, chatId, userId, state, text))) return;
+  if (state?.startsWith("{")) {
+    if (await onTiktokInput(ctx, chatId, userId, state, text)) return;
+    if (await onStopInput(ctx, chatId, userId, state, text)) return;
+  }
   if (state) await ctx.store.setState(userId, null); // устаревшее состояние (например, от заметок)
 
   // Кнопки главного меню
@@ -119,7 +122,7 @@ async function onCallback(ctx: Ctx, cb: CallbackQuery) {
     return onScheduleCallback(ctx, data, chatId, msg.message_id, cb.id);
   }
   if (msg && data.startsWith("tiktok:")) {
-    return onTiktokCallback(ctx, data, chatId, msg.message_id, cb.id);
+    return onTiktokCallback(ctx, data, chatId, userId, msg.message_id, cb.id);
   }
   if (msg && data.startsWith("home:")) {
     return onHomeCallback(ctx, data, chatId, msg.message_id, cb.id);
