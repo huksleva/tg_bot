@@ -19,25 +19,40 @@ import { escapeHtml } from "./telegram";
  * Если живого прогноза нет, бот оценивает: последний прибывший + интервал по расписанию.
  */
 
-/** Запрос к transport.orgp.spb.ru через посредника. */
-export async function orgp(env: Env, path: string): Promise<Response> {
-  if (!env.RELAY_URL || !env.RELAY_SECRET) throw new Error("Посредник не настроен");
-  const url = `${env.RELAY_URL}?path=${encodeURIComponent(path)}`;
+/** Один вызов посредника. */
+async function relayOnce(env: Env, path: string): Promise<Response> {
   let res: Response;
   try {
-    res = await fetch(url, {
-      headers: { "X-Relay-Secret": env.RELAY_SECRET },
-      signal: AbortSignal.timeout(25000),
+    res = await fetch(`${env.RELAY_URL}?path=${encodeURIComponent(path)}`, {
+      headers: { "X-Relay-Secret": env.RELAY_SECRET! },
+      signal: AbortSignal.timeout(16000), // посредник сдаётся максимум через ~14,5 с
     });
   } catch (e) {
     const name = (e as Error).name;
-    throw new Error(name === "TimeoutError" || name === "AbortError" ? "нет ответа за 25 с" : `нет связи: ${(e as Error).message}`);
+    throw new Error(name === "TimeoutError" || name === "AbortError" ? "нет ответа за 16 с" : `нет связи: ${(e as Error).message}`);
   }
   if (!res.ok) {
     const body = (await res.text().catch(() => "")).slice(0, 120);
     throw new Error(`HTTP ${res.status}${body ? `: ${body}` : ""}`);
   }
   return res;
+}
+
+/**
+ * Запрос к transport.orgp.spb.ru через посредника. Городские сайты не пускают часть адресов
+ * Яндекс.Облака: если вызов посредника не удался целиком, повторный обычно попадает на другую
+ * машину облака и проходит — поэтому одна повторная попытка.
+ */
+export async function orgp(env: Env, path: string): Promise<Response> {
+  if (!env.RELAY_URL || !env.RELAY_SECRET) throw new Error("Посредник не настроен");
+  try {
+    return await relayOnce(env, path);
+  } catch (e) {
+    const msg = (e as Error).message;
+    if (msg.startsWith("HTTP 403") || msg.startsWith("HTTP 400")) throw e; // повтор не поможет
+    console.warn("Посредник не ответил, повтор:", msg);
+    return relayOnce(env, path);
+  }
 }
 
 const nowSec = () => Math.floor(Date.now() / 1000);
