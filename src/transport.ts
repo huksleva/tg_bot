@@ -23,11 +23,20 @@ import { escapeHtml } from "./telegram";
 export async function orgp(env: Env, path: string): Promise<Response> {
   if (!env.RELAY_URL || !env.RELAY_SECRET) throw new Error("Посредник не настроен");
   const url = `${env.RELAY_URL}?path=${encodeURIComponent(path)}`;
-  const res = await fetch(url, {
-    headers: { "X-Relay-Secret": env.RELAY_SECRET },
-    signal: AbortSignal.timeout(25000),
-  });
-  if (!res.ok) throw new Error(`Посредник: HTTP ${res.status}`);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: { "X-Relay-Secret": env.RELAY_SECRET },
+      signal: AbortSignal.timeout(25000),
+    });
+  } catch (e) {
+    const name = (e as Error).name;
+    throw new Error(name === "TimeoutError" || name === "AbortError" ? "нет ответа за 25 с" : `нет связи: ${(e as Error).message}`);
+  }
+  if (!res.ok) {
+    const body = (await res.text().catch(() => "")).slice(0, 120);
+    throw new Error(`HTTP ${res.status}${body ? `: ${body}` : ""}`);
+  }
   return res;
 }
 
@@ -58,7 +67,7 @@ function mskStringToUnix(s: string) {
 /** Все машины из прогноза остановки — только её маршруты и её вид транспорта. */
 async function fetchForecast(env: Env, stop: Stop): Promise<Vehicle[]> {
   const res = await orgp(env, `/Portal/transport/internalapi/forecast/bystop?stopID=${stop.orgp_id}`);
-  const data = (await res.json()) as { success?: boolean; result?: ForecastItem[] };
+  const data = (await res.json().catch(() => ({}))) as { success?: boolean; result?: ForecastItem[] };
   if (!data.success) throw new Error("сайт транспорта вернул ошибку");
   const wanted = new Set(stop.routes.split(","));
   const list: Vehicle[] = [];
@@ -177,6 +186,21 @@ function estimate(stop: Stop, route: string, last: number | undefined, interval:
   return nextScheduled(stop, route, readyAt);
 }
 
+/** ВРЕМЕННО: прогноз по всем остановкам с замером — чтобы понять, отвечает ли посредник из Cloudflare. */
+export async function diagnoseRelay(ctx: Ctx, colo: string) {
+  const stops = (await ctx.store.listStops()).filter((s) => s.orgp_id);
+  const results = await Promise.all(stops.map(async (stop) => {
+    const t = Date.now();
+    try {
+      const list = await fetchForecast(ctx.env, stop);
+      return { stop: stop.orgp_id, ms: Date.now() - t, ok: true, vehicles: list.length };
+    } catch (e) {
+      return { stop: stop.orgp_id, ms: Date.now() - t, ok: false, error: (e as Error).message };
+    }
+  }));
+  return { colo, at: new Date().toISOString(), results };
+}
+
 /** Сравнивает варианты дороги и возвращает готовый текст. */
 export async function compareOptions(ctx: Ctx): Promise<string> {
   const stops = await ctx.store.listStops();
@@ -195,11 +219,14 @@ export async function compareOptions(ctx: Ctx): Promise<string> {
     if (!stop.orgp_id) return `${head}\nне задан номер для прогноза (/editstop)`;
 
     let live: Vehicle[] | null = null;
+    let failure = "";
     try {
       live = await fetchForecast(ctx.env, stop);
     } catch (e) {
-      console.error("Прогноз остановки", stop.id, e);
+      failure = (e as Error).message;
+      console.error("Прогноз остановки", stop.id, failure);
     }
+    const noAnswer = `сайт транспорта не ответил (${escapeHtml(failure)})`;
     const lastByRoute = await ctx.store.lastArrivals(stop.orgp_id);
     const readyAt = t + stop.walk_min * 60; // раньше этого времени на остановку не успеть
 
@@ -218,9 +245,9 @@ export async function compareOptions(ctx: Ctx): Promise<string> {
         if (est) {
           options.push({ stop, route, at: est, estimated: true });
           const how = last && interval && readyAt - last < 2 * interval * 60 ? "по интервалу" : "по расписанию";
-          main = `${live ? "живого прогноза нет" : "сайт транспорта не ответил"}, ≈ ${inMin(est)} (${how})`;
+          main = `${live ? "живого прогноза нет" : noAnswer}, ≈ ${inMin(est)} (${how})`;
         } else {
-          main = live ? "прогноза нет" : "сайт транспорта не ответил";
+          main = live ? "прогноза нет" : noAnswer;
         }
       }
 

@@ -1,7 +1,7 @@
 import type { Env } from "./env";
 import { Ctx, handleUpdate } from "./bot";
 import { runCommute } from "./commute";
-import { observeStops } from "./transport";
+import { diagnoseRelay, observeStops } from "./transport";
 import { ensureSchema } from "./db";
 import type { Update } from "./telegram";
 import { COMMANDS, DESCRIPTION, SHORT_DESCRIPTION } from "./texts";
@@ -18,6 +18,16 @@ export default {
         return new Response("Forbidden", { status: 403 });
       }
       return setup(new Ctx(env, url.origin));
+    }
+
+    // ВРЕМЕННО: отвечает ли посредник из Cloudflare (заголовок X-Report-Secret = RELAY_SECRET)
+    if (url.pathname === "/diag-relay") {
+      if (!env.RELAY_SECRET || request.headers.get("X-Report-Secret") !== env.RELAY_SECRET) {
+        return new Response("Forbidden", { status: 403 });
+      }
+      await ensureSchema(env.DB);
+      const colo = String((request as unknown as { cf?: { colo?: string } }).cf?.colo ?? "?");
+      return Response.json(await diagnoseRelay(new Ctx(env, url.origin), colo));
     }
 
     if (request.method !== "POST") {
