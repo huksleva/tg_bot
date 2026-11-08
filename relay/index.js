@@ -118,7 +118,7 @@ module.exports.handler = async (event) => {
 
     const path = one("path") || "";
     if (!path.startsWith(ALLOWED_PREFIX)) return text(400, "path must start with " + ALLOWED_PREFIX);
-    const res = await orgpFetch(path, 7000, 3);
+    const res = await orgpFetch(path, 6000, 4);
     return {
       statusCode: res.status,
       headers: { "Content-Type": res.type || "application/octet-stream" },
@@ -153,7 +153,7 @@ async function probe() {
     }
   }));
   try {
-    const r = await orgpFetch("/Portal/transport/internalapi/gtfs/realtime/vehicle?transports=tram", 7000, 3);
+    const r = await orgpFetch("/Portal/transport/internalapi/gtfs/realtime/vehicle?transports=tram", 6000, 4);
     lines.push(`orgp через доверенный сертификат -> ${r.status}, ${r.body.length} байт`);
   } catch (e) {
     lines.push(`orgp через доверенный сертификат -> ОШИБКА ${describe(e)}`);
@@ -181,17 +181,41 @@ function orgpGet(path, timeoutMs) {
   });
 }
 
-/** Запрос с повторами: сайт иногда не отвечает с первого раза. */
-async function orgpFetch(path, timeoutMs, attempts) {
-  const errors = [];
-  for (let i = 1; i <= attempts; i++) {
-    try {
-      return await orgpGet(path, timeoutMs);
-    } catch (e) {
-      errors.push(`попытка ${i}: ${describe(e)}`);
-    }
-  }
-  throw new Error(errors.join("; "));
+/**
+ * Запрос «с подстраховкой». Сайт примерно на каждый третий запрос не отвечает вовсе, а когда
+ * отвечает — меньше чем за секунду. Поэтому не ждём зависший запрос: если ответа нет hedgeMs,
+ * параллельно отправляем следующий (всего не больше attempts) и берём первый ответ.
+ */
+function orgpFetch(path, timeoutMs, attempts, hedgeMs = 2500) {
+  return new Promise((resolve, reject) => {
+    const errors = [];
+    let started = 0;
+    let failed = 0;
+    let done = false;
+    let timer = null;
+    const finish = (fn, value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      fn(value);
+    };
+    const launch = () => {
+      if (done || started >= attempts) return;
+      const n = ++started;
+      orgpGet(path, timeoutMs).then(
+        (res) => finish(resolve, res),
+        (e) => {
+          errors.push(`попытка ${n}: ${describe(e)}`);
+          failed++;
+          if (failed >= attempts) finish(reject, new Error(errors.join("; ")));
+          else if (failed === started) launch(); // в полёте ничего нет — сразу следующую
+        },
+      );
+      clearTimeout(timer);
+      if (started < attempts) timer = setTimeout(launch, hedgeMs);
+    };
+    launch();
+  });
 }
 
 /** Текст ошибки вместе с её причиной (fetch прячет её в cause). */

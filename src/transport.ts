@@ -83,6 +83,16 @@ async function fetchForecast(env: Env, stop: Stop): Promise<Vehicle[]> {
 
 // ---------------- 2. Фактические прибытия (cron) ----------------
 
+const snapshotKey = (stop: Stop) => `obs:${stop.orgp_id}:${stop.kind}:${stop.routes}`;
+
+/** Последний прогноз, который получил cron, если он не старше maxAgeSec. */
+async function recentSnapshot(ctx: Ctx, stop: Stop, maxAgeSec: number): Promise<Vehicle[] | null> {
+  const raw = await ctx.store.getSetting(snapshotKey(stop));
+  if (!raw) return null;
+  const snap = JSON.parse(raw) as { t: number; v: Vehicle[] };
+  return nowSec() - snap.t <= maxAgeSec ? snap.v : null;
+}
+
 /** С какого и до какого часа (по Москве) следить за остановками. */
 const OBSERVE_FROM_HOUR = 5;
 
@@ -103,7 +113,7 @@ export async function observeStops(ctx: Ctx) {
       console.error("Наблюдение за остановкой", stop.orgp_id, e);
       return;
     }
-    const key = `obs:${stop.orgp_id}:${stop.kind}:${stop.routes}`;
+    const key = snapshotKey(stop);
     const prevRaw = await ctx.store.getSetting(key);
     const prev = prevRaw ? (JSON.parse(prevRaw) as { t: number; v: Vehicle[] }) : null;
     const byVehicle = new Map(current.map((v) => [v.vehicle, v]));
@@ -186,23 +196,12 @@ function estimate(stop: Stop, route: string, last: number | undefined, interval:
   return nextScheduled(stop, route, readyAt);
 }
 
-/** ВРЕМЕННО: прогноз по всем остановкам с замером — чтобы понять, отвечает ли посредник из Cloudflare. */
-export async function diagnoseRelay(ctx: Ctx, colo: string) {
-  const stops = (await ctx.store.listStops()).filter((s) => s.orgp_id);
-  const results = await Promise.all(stops.map(async (stop) => {
-    const t = Date.now();
-    try {
-      const list = await fetchForecast(ctx.env, stop);
-      return { stop: stop.orgp_id, ms: Date.now() - t, ok: true, vehicles: list.length };
-    } catch (e) {
-      return { stop: stop.orgp_id, ms: Date.now() - t, ok: false, error: (e as Error).message };
-    }
-  }));
-  return { colo, at: new Date().toISOString(), results };
-}
-
-/** Сравнивает варианты дороги и возвращает готовый текст. */
-export async function compareOptions(ctx: Ctx): Promise<string> {
+/**
+ * mode = "live"  — свежий прогноз с сайта транспорта (может занять несколько секунд);
+ * mode = "quick" — без запросов: прогноз, который cron получил не больше 2 минут назад,
+ *                  иначе оценка по расписанию. Нужен, чтобы ответить мгновенно.
+ */
+export async function compareOptions(ctx: Ctx, mode: "live" | "quick" = "live"): Promise<string> {
   const stops = await ctx.store.listStops();
   if (!stops.length) return "Остановок нет — добавь их: /addstop";
   if (!ctx.env.RELAY_URL || !ctx.env.RELAY_SECRET) {
@@ -219,14 +218,20 @@ export async function compareOptions(ctx: Ctx): Promise<string> {
     if (!stop.orgp_id) return `${head}\nне задан номер для прогноза (/editstop)`;
 
     let live: Vehicle[] | null = null;
-    let failure = "";
-    try {
-      live = await fetchForecast(ctx.env, stop);
-    } catch (e) {
-      failure = (e as Error).message;
-      console.error("Прогноз остановки", stop.id, failure);
+    let noAnswer = "";
+    if (mode === "quick") {
+      live = await recentSnapshot(ctx, stop, 120);
+      if (live) live = live.filter((v) => v.at >= t);
+      noAnswer = "загружаю живой прогноз…";
+    } else {
+      try {
+        live = await fetchForecast(ctx.env, stop);
+      } catch (e) {
+        const failure = (e as Error).message;
+        console.error("Прогноз остановки", stop.id, failure);
+        noAnswer = `сайт транспорта не ответил (${escapeHtml(failure)})`;
+      }
     }
-    const noAnswer = `сайт транспорта не ответил (${escapeHtml(failure)})`;
     const lastByRoute = await ctx.store.lastArrivals(stop.orgp_id);
     const readyAt = t + stop.walk_min * 60; // раньше этого времени на остановку не успеть
 

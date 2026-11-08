@@ -85,8 +85,8 @@ export async function runCommute(ctx: Ctx) {
 }
 
 /** Текст с прогнозом транспорта. */
-export async function commuteMessage(ctx: Ctx, header: string) {
-  const forecast = await compareOptions(ctx).catch((e) => {
+export async function commuteMessage(ctx: Ctx, header: string, mode: "live" | "quick" = "live") {
+  const forecast = await compareOptions(ctx, mode).catch((e) => {
     console.error("Прогноз транспорта", e);
     return "Прогноз транспорта сейчас недоступен.";
   });
@@ -110,7 +110,7 @@ function homeKb(subscribed: boolean): InlineKeyboard {
 }
 
 /** Текст ответа на кнопку «Домой» / команду /home. */
-async function homeText(ctx: Ctx, chatId: number) {
+async function homeText(ctx: Ctx, chatId: number, mode: "live" | "quick" = "live") {
   const subscribed = await ctx.store.isCommuteSub(chatId);
   let planLine: string;
   try {
@@ -124,13 +124,19 @@ async function homeText(ctx: Ctx, chatId: number) {
   const auto = subscribed
     ? `Сообщение через ${COMMUTE.offsetMin} мин после последней пары: <b>включено</b>.`
     : `Сообщение через ${COMMUTE.offsetMin} мин после последней пары: <b>выключено</b>.`;
-  const body = await commuteMessage(ctx, "Дорога домой");
+  const body = await commuteMessage(ctx, "Дорога домой", mode);
   return { text: `${body}\n\n${planLine}\n${auto}`, kb: homeKb(subscribed) };
 }
 
+/**
+ * Сначала мгновенный ответ (последний прогноз cron или оценка по расписанию),
+ * потом то же сообщение обновляется свежим прогнозом с сайта транспорта.
+ */
 export async function showHome(ctx: Ctx, chatId: number) {
-  const { text, kb } = await homeText(ctx, chatId);
-  await ctx.tg.send(chatId, text, kb);
+  const quick = await homeText(ctx, chatId, "quick");
+  const sent = await ctx.tg.send(chatId, quick.text, quick.kb);
+  const full = await homeText(ctx, chatId, "live");
+  if (full.text !== quick.text) await ctx.tg.edit(chatId, sent.message_id, full.text, full.kb);
 }
 
 /** Кнопки под сообщением «Дорога домой». */
@@ -139,10 +145,13 @@ export async function onHomeCallback(ctx: Ctx, data: string, chatId: number, mes
   if (data === "home:off") await ctx.store.setCommuteSub(chatId, false);
   await ctx.tg.answer(
     cbId,
-    data === "home:on" ? "Буду присылать" : data === "home:off" ? "Не буду присылать" : "Обновлено",
+    data === "home:on" ? "Буду присылать" : data === "home:off" ? "Не буду присылать" : "Обновляю прогноз…",
   );
-  const { text, kb } = await homeText(ctx, chatId);
-  await ctx.tg.edit(chatId, messageId, text, kb);
+  // Сразу — то, что известно без запроса, потом — свежий прогноз
+  const quick = await homeText(ctx, chatId, "quick");
+  await ctx.tg.edit(chatId, messageId, quick.text, quick.kb);
+  const full = await homeText(ctx, chatId, "live");
+  if (full.text !== quick.text) await ctx.tg.edit(chatId, messageId, full.text, full.kb);
 }
 
 // ---------------- Расписание на день ----------------
