@@ -95,7 +95,9 @@ d57WaIpofV5cVhhwShOgAuBc9UMJF3/n4t4RKiPxtsK8P67gcmphMhslj7AMYrYM
 ej2NvQZY4m3ub3CPC/PrTjDONvb+8g5xrKtxBjYqC74HSB4dg9G3WimSDUuP2Su6
 G2y2TUeyJuCvCLz289VoO0vg7cNdMobE3KCqAiiNhN2VBFxHAUKmUoRcRdw=
 -----END CERTIFICATE-----`;
-const orgpAgent = new https.Agent({ ca: [RUSSIAN_TRUSTED_ROOT_CA, RUSSIAN_TRUSTED_SUB_CA], keepAlive: true });
+// Без keep-alive: между вызовами функции простаивающие соединения молча обрываются по дороге,
+// и запрос в такое «мёртвое» соединение висит до таймаута. Новое соединение — +0,1 с, зато надёжно.
+const orgpAgent = new https.Agent({ ca: [RUSSIAN_TRUSTED_ROOT_CA, RUSSIAN_TRUSTED_SUB_CA], keepAlive: false });
 const ALLOWED_PREFIX = "/Portal/transport/internalapi/";
 const FEED = "/Portal/transport/internalapi/gtfs/feed.zip";
 const MAX_LINES = 2000;
