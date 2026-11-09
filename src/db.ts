@@ -1,7 +1,7 @@
 const SCHEMA = [
   // Таблицы notes и reminders от убранных заметок и напоминаний больше не создаются;
   // если они уже есть в базе, их данные не трогаем.
-  // Что бот ждёт от пользователя (пошаговый ввод остановки)
+  // Что бот ждёт от пользователя (от прежних версий с пошаговым вводом; теперь только сбрасывается)
   `CREATE TABLE IF NOT EXISTS user_state (
      user_id INTEGER PRIMARY KEY,
      state TEXT NOT NULL)`,
@@ -67,7 +67,6 @@ export interface Stop {
   walk_min: number;
   orgp_id: number | null;
 }
-export type StopField = "kind" | "name" | "routes" | "walk_min" | "orgp_id";
 
 export class Store {
   constructor(private db: D1Database) {}
@@ -76,31 +75,6 @@ export class Store {
   async listStops() {
     const { results } = await this.db.prepare("SELECT * FROM stops ORDER BY id").all<Stop>();
     return results;
-  }
-
-  async getStop(id: number) {
-    return this.db.prepare("SELECT * FROM stops WHERE id = ?").bind(id).first<Stop>();
-  }
-
-  async addStop(s: Omit<Stop, "id" | "orgp_id">) {
-    const r = await this.db
-      .prepare("INSERT INTO stops (kind, name, routes, walk_min) VALUES (?, ?, ?, ?) RETURNING id")
-      .bind(s.kind, s.name, s.routes, s.walk_min)
-      .first<{ id: number }>();
-    return r!.id;
-  }
-
-  async updateStop(id: number, field: StopField, value: string | number | null) {
-    // Имя поля — только из фиксированного списка, значение — через bind
-    const allowed: StopField[] = ["kind", "name", "routes", "walk_min", "orgp_id"];
-    if (!allowed.includes(field)) throw new Error("bad field");
-    const r = await this.db.prepare(`UPDATE stops SET ${field} = ? WHERE id = ?`).bind(value, id).run();
-    return r.meta.changes > 0;
-  }
-
-  async deleteStop(id: number) {
-    const r = await this.db.prepare("DELETE FROM stops WHERE id = ?").bind(id).run();
-    return r.meta.changes > 0;
   }
 
   // --- Фактические прибытия ---

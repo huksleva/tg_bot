@@ -1,7 +1,6 @@
 import type { Env } from "./env";
 import { Store } from "./db";
 import { onHomeCallback, onScheduleCallback, onUniScreenCallback, showHome, showSchedule, showUniScreen } from "./commute";
-import { onStopInput, onStopsCallback, showStops, startAdd, startDelete, startEdit } from "./stops";
 import { BTN, mainMenu } from "./keyboards";
 import { Telegram, escapeHtml, type CallbackQuery, type Message, type Update } from "./telegram";
 import { HELP, UNKNOWN, WELCOME } from "./texts";
@@ -48,19 +47,14 @@ async function onMessage(ctx: Ctx, msg: Message) {
   const menuText = text.replace(/^[^\p{L}]+/u, "");
   const isMenu = (Object.values(BTN) as string[]).includes(menuText);
 
-  // Ответ на вопрос бота (данные остановки). Команды и кнопки меню ответом
-  // не считаются — они прерывают ввод.
-  const state = command || isMenu ? null : await ctx.store.getState(userId);
-  if (state?.startsWith("{") && (await onStopInput(ctx, chatId, userId, state, text))) return;
-  if (state) await ctx.store.setState(userId, null); // устаревшее состояние (например, от заметок)
+  // Пошагового ввода в боте больше нет — незаконченный ввод от старых версий просто сбрасываем
+  if (await ctx.store.getState(userId)) await ctx.store.setState(userId, null);
 
   // Кнопки главного меню
-  if (isMenu) await ctx.store.setState(userId, null);
   switch (menuText) {
     case BTN.home: return showHome(ctx, chatId);
     case BTN.uni: return showUniScreen(ctx, chatId);
     case BTN.schedule: return showSchedule(ctx, chatId);
-    case BTN.stops: return showStops(ctx, chatId);
     case BTN.help: return void (await ctx.tg.send(chatId, HELP, mainMenu));
   }
 
@@ -80,14 +74,6 @@ async function onMessage(ctx: Ctx, msg: Message) {
       return showUniScreen(ctx, chatId);
     case "schedule":
       return showSchedule(ctx, chatId, args === "завтра" || args === "tomorrow" ? 1 : 0);
-    case "stops":
-      return showStops(ctx, chatId);
-    case "addstop":
-      return startAdd(ctx, chatId);
-    case "editstop":
-      return startEdit(ctx, chatId, args || undefined);
-    case "delstop":
-      return startDelete(ctx, chatId, args || undefined);
     case "help":
       return void (await ctx.tg.send(chatId, HELP, mainMenu));
     case "id":
@@ -95,9 +81,6 @@ async function onMessage(ctx: Ctx, msg: Message) {
         chatId,
         `Твой ID: <code>${userId}</code>\nID чата: <code>${chatId}</code>`,
       ));
-    case "cancel":
-      await ctx.store.setState(userId, null);
-      return void (await ctx.tg.send(chatId, "Отменено"));
   }
 
   await ctx.tg.send(chatId, UNKNOWN, mainMenu);
@@ -109,11 +92,7 @@ async function onCallback(ctx: Ctx, cb: CallbackQuery) {
   const data = cb.data ?? "";
   const msg = cb.message;
   const chatId = msg?.chat.id ?? cb.from.id;
-  const userId = cb.from.id;
 
-  if (msg && data.startsWith("stops:")) {
-    return onStopsCallback(ctx, data, chatId, userId, msg.message_id, cb.id);
-  }
   if (msg && data.startsWith("sched:")) {
     return onScheduleCallback(ctx, data, chatId, msg.message_id, cb.id);
   }
@@ -124,6 +103,6 @@ async function onCallback(ctx: Ctx, cb: CallbackQuery) {
     return onHomeCallback(ctx, data, chatId, msg.message_id, cb.id);
   }
 
-  // Кнопки из старых сообщений (заметки, огонёк и т.п.) — просто закрываем «часики»
+  // Кнопки из старых сообщений (заметки, огонёк, остановки и т.п.) — просто закрываем «часики»
   await ctx.tg.answer(cb.id);
 }

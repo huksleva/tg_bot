@@ -15,13 +15,8 @@ export const HELP =
   "  (там же сообщение за 1 ч 2 мин до первой пары)\n\n" +
   "<b>Дорога домой</b>\n" +
   "/home — что приедет быстрее с твоих остановок\n" +
-  "  (там же можно включить сообщение через 30 минут после пар)\n" +
-  "/stops — список остановок\n" +
-  "/addstop — добавить остановку\n" +
-  "/editstop — изменить остановку\n" +
-  "/delstop — удалить остановку\n\n" +
+  "  (там же можно включить сообщение через 30 минут после пар)\n\n" +
   "/id — твой Telegram ID\n" +
-  "/cancel — отменить ввод\n" +
   "/help — эта справка";
 
 export const UNKNOWN = "Не уразумел я, господине. Глянь /help";
@@ -31,10 +26,6 @@ export const COMMANDS = [
   { command: "schedule", description: "Расписание пар на сегодня" },
   { command: "uni", description: "Дорога в вуз: что быстрее до метро" },
   { command: "home", description: "Дорога домой: что приедет быстрее" },
-  { command: "stops", description: "Мои остановки" },
-  { command: "addstop", description: "Добавить остановку" },
-  { command: "editstop", description: "Изменить остановку" },
-  { command: "delstop", description: "Удалить остановку" },
   { command: "help", description: "Что умеет бот" },
   { command: "id", description: "Мой Telegram ID" },
 ];

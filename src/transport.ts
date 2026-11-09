@@ -1,11 +1,14 @@
 import type { Ctx } from "./bot";
 import type { Env } from "./env";
-import type { Stop } from "./db";
+import type { Stop, StopKind } from "./db";
 import ROUTES from "./routes.json";
 import TIMETABLE from "./timetable.json";
 import { mskHour, mskTime } from "./schedule";
-import { KIND_NAME, stopTitle } from "./stops";
 import { escapeHtml } from "./telegram";
+
+export const KIND_NAME: Record<StopKind, string> = { bus: "Автобус", tram: "Трамвай", trolley: "Троллейбус" };
+
+const stopTitle = (s: Stop) => `${KIND_NAME[s.kind] ?? s.kind} ${s.routes.split(",").join(", ")} — ${s.name}`;
 
 /**
  * Прогноз прибытия транспорта Петербурга.
@@ -218,7 +221,7 @@ function estimate(stop: Stop, route: string, last: number | undefined, interval:
  */
 export async function compareOptions(ctx: Ctx, mode: "live" | "quick" = "live"): Promise<string> {
   const stops = await ctx.store.listStops();
-  if (!stops.length) return "Остановок нет — добавь их: /addstop";
+  if (!stops.length) return "Остановок нет.";
   if (!ctx.env.RELAY_URL || !ctx.env.RELAY_SECRET) {
     return stops.map((s) => `— ${escapeHtml(stopTitle(s))}`).join("\n") +
       "\n\nПрогноз недоступен: не настроен посредник (RELAY_URL, RELAY_SECRET).";
@@ -230,7 +233,7 @@ export async function compareOptions(ctx: Ctx, mode: "live" | "quick" = "live"):
     const routes = stop.routes.split(",");
     const head = `<b>${escapeHtml(KIND_NAME[stop.kind] ?? stop.kind)} ${escapeHtml(routes.join(", "))}</b>` +
       (stop.walk_min ? ` (идти ${stop.walk_min} мин)` : "");
-    if (!stop.orgp_id) return `${head}\nне задан номер для прогноза (/editstop)`;
+    if (!stop.orgp_id) return `${head}\nне задан номер для прогноза`;
 
     let live: Vehicle[] | null = null;
     let noAnswer = "";
