@@ -8,6 +8,9 @@ const SCHEMA = [
   // Кому присылать сообщение «пора домой» после пар
   `CREATE TABLE IF NOT EXISTS commute_subs (
      chat_id INTEGER PRIMARY KEY)`,
+  // Кому присылать «В вуз» перед первой парой
+  `CREATE TABLE IF NOT EXISTS uni_subs (
+     chat_id INTEGER PRIMARY KEY)`,
   // Служебные значения бота
   `CREATE TABLE IF NOT EXISTS settings (
      key TEXT PRIMARY KEY,
@@ -124,6 +127,24 @@ export class Store {
 
   async pruneArrivals(before: number) {
     await this.db.prepare("DELETE FROM arrivals WHERE at < ?").bind(before).run();
+  }
+
+  // --- Подписка на сообщение перед парами ---
+  async isUniSub(chatId: number) {
+    const r = await this.db.prepare("SELECT 1 FROM uni_subs WHERE chat_id = ?").bind(chatId).first();
+    return r !== null;
+  }
+
+  async setUniSub(chatId: number, on: boolean) {
+    const sql = on
+      ? "INSERT OR IGNORE INTO uni_subs (chat_id) VALUES (?)"
+      : "DELETE FROM uni_subs WHERE chat_id = ?";
+    await this.db.prepare(sql).bind(chatId).run();
+  }
+
+  async listUniSubs() {
+    const { results } = await this.db.prepare("SELECT chat_id FROM uni_subs").all<{ chat_id: number }>();
+    return results.map((r) => r.chat_id);
   }
 
   // --- Подписка на сообщение после пар ---

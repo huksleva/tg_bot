@@ -80,7 +80,7 @@ function mskStringToUnix(s: string) {
 }
 
 /** Все машины из прогноза остановки — только её маршруты и её вид транспорта. */
-async function fetchForecast(env: Env, stop: Stop): Promise<Vehicle[]> {
+export async function fetchForecast(env: Env, stop: Stop): Promise<Vehicle[]> {
   const res = await orgp(env, `/Portal/transport/internalapi/forecast/bystop?stopID=${stop.orgp_id}`);
   const data = (await res.json().catch(() => ({}))) as { success?: boolean; result?: ForecastItem[] };
   if (!data.success) throw new Error("сайт транспорта вернул ошибку");
@@ -179,7 +179,7 @@ export function scheduledInterval(stop: Stop, route: string, unix = nowSec()): n
 }
 
 /** Ближайшее прибытие по расписанию не раньше указанного времени (unix). */
-function nextScheduled(stop: Stop, route: string, after: number): number | null {
+export function nextScheduled(stop: Stop, route: string, after: number): number | null {
   const { min, daytype } = mskClock(after);
   const times = (TIMETABLE as Timetable)[String(stop.orgp_id)]?.[route]?.[daytype];
   const next = times?.find((x) => x >= min);

@@ -1,6 +1,6 @@
 import type { Env } from "./env";
 import { Store } from "./db";
-import { onHomeCallback, onScheduleCallback, showHome, showSchedule } from "./commute";
+import { onHomeCallback, onScheduleCallback, onUniScreenCallback, showHome, showSchedule, showUniScreen } from "./commute";
 import { onStopInput, onStopsCallback, showStops, startAdd, startDelete, startEdit } from "./stops";
 import { BTN, mainMenu } from "./keyboards";
 import { Telegram, escapeHtml, type CallbackQuery, type Message, type Update } from "./telegram";
@@ -58,6 +58,7 @@ async function onMessage(ctx: Ctx, msg: Message) {
   if (isMenu) await ctx.store.setState(userId, null);
   switch (menuText) {
     case BTN.home: return showHome(ctx, chatId);
+    case BTN.uni: return showUniScreen(ctx, chatId);
     case BTN.schedule: return showSchedule(ctx, chatId);
     case BTN.stops: return showStops(ctx, chatId);
     case BTN.help: return void (await ctx.tg.send(chatId, HELP, mainMenu));
@@ -75,6 +76,8 @@ async function onMessage(ctx: Ctx, msg: Message) {
     }
     case "home":
       return showHome(ctx, chatId);
+    case "uni":
+      return showUniScreen(ctx, chatId);
     case "schedule":
       return showSchedule(ctx, chatId, args === "завтра" || args === "tomorrow" ? 1 : 0);
     case "stops":
@@ -113,6 +116,9 @@ async function onCallback(ctx: Ctx, cb: CallbackQuery) {
   }
   if (msg && data.startsWith("sched:")) {
     return onScheduleCallback(ctx, data, chatId, msg.message_id, cb.id);
+  }
+  if (msg && data.startsWith("uni:")) {
+    return onUniScreenCallback(ctx, data, chatId, msg.message_id, cb.id);
   }
   if (msg && data.startsWith("home:")) {
     return onHomeCallback(ctx, data, chatId, msg.message_id, cb.id);

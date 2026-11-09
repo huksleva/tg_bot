@@ -3,6 +3,7 @@ import type { InlineKeyboard } from "./telegram";
 import { fetchDay, fetchLessons, humanDate, mskDate, mskHour, mskTime, mskToUnix } from "./schedule";
 import { escapeHtml } from "./telegram";
 import { compareOptions } from "./transport";
+import { onUniCallback, showUni, uniRefreshKb, uniText } from "./journeys";
 
 /** Настройки дороги домой. */
 export const COMMUTE = {
@@ -10,6 +11,8 @@ export const COMMUTE = {
   groupId: 24432,
   /** Через сколько минут после конца последней пары присылать сообщение */
   offsetMin: 30,
+  /** За сколько минут до начала первой пары присылать «В вуз» (выход из дома) */
+  leaveBeforeMin: 62,
   /** С какого часа (по Москве) загружать расписание на сегодня */
   planFromHour: 6,
 };
@@ -19,6 +22,9 @@ interface Plan {
   end: string | null; // конец последней пары; null — пар нет
   notifyAt: number | null; // когда прислать сообщение
   sent?: boolean;
+  start?: string | null; // начало первой пары
+  morningAt?: number | null; // когда прислать «В вуз»
+  morningSent?: boolean;
 }
 
 const planKey = (date: string) => `commute:plan:${date}`;
@@ -36,11 +42,18 @@ const savePlan = (ctx: Ctx, plan: Plan) => ctx.store.setSetting(planKey(plan.dat
 async function buildPlan(ctx: Ctx, date: string): Promise<Plan> {
   const day = await fetchDay(COMMUTE.groupId, date);
   const plan: Plan = day
-    ? { date, end: day.end, notifyAt: mskToUnix(date, day.end) + COMMUTE.offsetMin * 60 }
-    : { date, end: null, notifyAt: null };
+    ? {
+        date,
+        end: day.end,
+        notifyAt: mskToUnix(date, day.end) + COMMUTE.offsetMin * 60,
+        start: day.start,
+        morningAt: mskToUnix(date, day.start) - COMMUTE.leaveBeforeMin * 60,
+      }
+    : { date, end: null, notifyAt: null, start: null, morningAt: null };
   // Если план составлен уже после времени сообщения (например, бот задеплоен вечером) —
   // не присылаем задним числом
   if (plan.notifyAt && plan.notifyAt < now() - 30 * 60) plan.sent = true;
+  if (plan.morningAt && plan.morningAt < now() - 30 * 60) plan.morningSent = true;
   await savePlan(ctx, plan);
   return plan;
 }
@@ -48,7 +61,8 @@ async function buildPlan(ctx: Ctx, date: string): Promise<Plan> {
 /** План на сегодня: из базы или свежий с сайта. */
 export async function todayPlan(ctx: Ctx): Promise<Plan> {
   const date = mskDate(now());
-  return (await loadPlan(ctx, date)) ?? buildPlan(ctx, date);
+  const plan = await loadPlan(ctx, date);
+  return plan && plan.start !== undefined ? plan : buildPlan(ctx, date); // старый план без начала пар — пересобрать
 }
 
 /** Вызывается cron раз в минуту. */
@@ -56,6 +70,7 @@ export async function runCommute(ctx: Ctx) {
   const t = now();
   const date = mskDate(t);
   let plan = await loadPlan(ctx, date);
+  if (plan && plan.start === undefined) plan = null; // план старого формата (без начала пар) — пересобрать
 
   if (!plan) {
     if (mskHour(t) < COMMUTE.planFromHour) return;
@@ -69,6 +84,20 @@ export async function runCommute(ctx: Ctx) {
       console.error("Не удалось загрузить расписание", e);
       await ctx.store.setSetting(retryKey, String(t + 600));
       return;
+    }
+  }
+
+  // Утром — «В вуз» за leaveBeforeMin до первой пары
+  if (plan.morningAt && !plan.morningSent && t >= plan.morningAt) {
+    plan.morningSent = true;
+    await savePlan(ctx, plan);
+    const subs = await ctx.store.listUniSubs();
+    if (subs.length) {
+      const body = await uniText(ctx).catch(() => "Прогноз транспорта сейчас недоступен.");
+      const text = `<b>Первая пара в ${plan.start}. Пора выходить, господине.</b>\n\n${body}`;
+      for (const chatId of subs) {
+        await ctx.tg.send(chatId, text, uniRefreshKb).catch((e) => console.error("uni send", chatId, e));
+      }
     }
   }
 
@@ -195,4 +224,25 @@ export async function onScheduleCallback(ctx: Ctx, data: string, chatId: number,
   const offset = data === "sched:1" ? 1 : 0;
   await ctx.tg.answer(cbId);
   await ctx.tg.edit(chatId, messageId, await scheduleText(offset), scheduleKb(offset));
+}
+
+// ---------------- Дорога в вуз ----------------
+
+async function uniPlanLine(ctx: Ctx) {
+  try {
+    const plan = await todayPlan(ctx);
+    if (!plan.start || !plan.morningAt) return "Сегодня пар нет.";
+    if (plan.morningSent || now() > plan.morningAt) return `Сегодня первая пара была в ${plan.start}.`;
+    return `Сегодня первая пара в ${plan.start}, напомню в ${mskTime(plan.morningAt)}.`;
+  } catch {
+    return "Расписание сейчас не загрузилось.";
+  }
+}
+
+export async function showUniScreen(ctx: Ctx, chatId: number) {
+  await showUni(ctx, chatId, await uniPlanLine(ctx), COMMUTE.leaveBeforeMin);
+}
+
+export async function onUniScreenCallback(ctx: Ctx, data: string, chatId: number, messageId: number, cbId: string) {
+  await onUniCallback(ctx, data, chatId, messageId, cbId, await uniPlanLine(ctx), COMMUTE.leaveBeforeMin);
 }
