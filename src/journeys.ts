@@ -9,7 +9,8 @@ import { fetchForecast, nextScheduled, type Vehicle } from "./transport";
  *
  * Варианты бывают с пересадкой, поэтому сравниваем не «кто раньше подойдёт», а «во сколько
  * окажешься у метро»: ожидание + поездка + пешком + ожидание следующего транспорта + поездка.
- * Время в пути — медиана по расписанию из справочника GTFS (днём), пешком — по Яндекс.Навигатору.
+ * Время в пути — медиана по расписанию из справочника GTFS (днём), пешком — по Яндекс.Навигатору:
+ * Шуваловский пр. → Ул. Шаврова 4 мин, ул. Уточкина → метро 2 мин, трамвайная остановка → метро 3 мин.
  */
 
 interface Leg {
@@ -40,13 +41,13 @@ export const TO_UNI = {
     },
     {
       title: "Автобус 170 до метро (ост. ул. Уточкина)",
-      legs: [{ ...GLUKHARSKAYA, routes: ["170"], ride: { "170": 20 }, alight: "ул. Уточкина" }],
+      legs: [{ ...GLUKHARSKAYA, routes: ["170"], ride: { "170": 20 }, alight: "ул. Уточкина", walkAfter: 2 }],
     },
     {
       title: "Автобус 85/170 + трамвай 47/55",
       legs: [
         { ...GLUKHARSKAYA, routes: ["85", "170"], ride: { "85": 5, "170": 6 }, alight: "Шуваловский пр.", walkAfter: 4 },
-        { stop: 16017, stopName: "Ул. Шаврова", kind: "tram", routes: ["47", "55"], ride: { "47": 10, "55": 10 }, alight: "ст. метро" },
+        { stop: 16017, stopName: "Ул. Шаврова", kind: "tram", routes: ["47", "55"], ride: { "47": 10, "55": 10 }, alight: "остановка у метро", walkAfter: 3 },
       ],
     },
   ] as Journey[],
@@ -135,7 +136,7 @@ function describe(plan: Plan) {
     const dep = `${s.dep.estimated ? "≈ " : ""}${s.dep.route} ${i === 0 ? inMin(s.dep.at) : "в"} ${i === 0 ? `(${mskTime(s.dep.at)})` : mskTime(s.dep.at)}`;
     const kind = i === 0 ? "" : `${KIND[s.leg.kind]} `;
     const walk = s.leg.walkAfter ? `, ${s.leg.walkAfter} мин пешком` : "";
-    const off = i < plan.steps.length - 1 ? ` → ${s.leg.alight} в ${mskTime(s.off)}${walk}` : "";
+    const off = i < plan.steps.length - 1 || walk ? ` → ${s.leg.alight} в ${mskTime(s.off)}${walk}` : "";
     return `${kind}${dep}${off}`;
   });
   return `${parts.join(" → ")} → у метро в ${mskTime(plan.arrival)}`;
