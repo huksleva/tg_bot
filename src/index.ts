@@ -1,5 +1,5 @@
 import type { Env } from "./env";
-import { Ctx, handleUpdate } from "./bot";
+import { Ctx, handleUpdate, parseIds, resetAccessCache } from "./bot";
 import { runCommute } from "./commute";
 import { observeStops } from "./transport";
 import { ensureSchema } from "./db";
@@ -13,11 +13,12 @@ export default {
     // Ручная настройка: вебхук, меню команд, описание. Нужна только после смены
     // токена или секрета — меню и описание бот обновляет сам (см. syncProfile).
     // Открыть в браузере: https://<worker>/setup?secret=<WEBHOOK_SECRET>
+    // &owner=<ID через запятую> — кому можно пользоваться ботом (сохраняется в базе)
     if (url.pathname === "/setup") {
-      if (url.searchParams.get("secret") !== env.WEBHOOK_SECRET) {
+      if (!env.WEBHOOK_SECRET || url.searchParams.get("secret") !== env.WEBHOOK_SECRET) {
         return new Response("Forbidden", { status: 403 });
       }
-      return setup(new Ctx(env, url.origin));
+      return setup(new Ctx(env, url.origin), url.searchParams.get("owner"));
     }
 
     if (request.method !== "POST") {
@@ -25,7 +26,7 @@ export default {
     }
 
     // Принимаем только запросы от Telegram
-    if (request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.WEBHOOK_SECRET) {
+    if (!env.WEBHOOK_SECRET || request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.WEBHOOK_SECRET) {
       return new Response("Forbidden", { status: 403 });
     }
 
@@ -73,7 +74,7 @@ async function syncProfile(ctx: Ctx) {
   profileSynced = true;
 }
 
-async function setup(ctx: Ctx): Promise<Response> {
+async function setup(ctx: Ctx, owner: string | null): Promise<Response> {
   const steps: [string, Promise<unknown>][] = [
     ["setWebhook", ctx.tg.call("setWebhook", {
       url: ctx.origin,
@@ -96,5 +97,17 @@ async function setup(ctx: Ctx): Promise<Response> {
   );
   await ensureSchema(ctx.env.DB);
   lines.push("OK    База готова");
+  if (owner !== null) {
+    const ids = parseIds(owner);
+    if (!ids.length) {
+      lines.push("ОШИБКА owner: нужны числовые ID через запятую");
+    } else {
+      await ctx.store.setSetting("allowed_ids", ids.join(","));
+      resetAccessCache();
+      lines.push(`OK    Доступ: ${ids.length} ID`);
+    }
+  }
+  const allowed = await ctx.loadAccess();
+  lines.push(allowed.size ? `OK    Боту можно писать: ${allowed.size} ID` : "ВНИМАНИЕ бот никому не отвечает: задайте owner или ALLOWED_IDS");
   return new Response(lines.join("\n"), { headers: { "Content-Type": "text/plain; charset=utf-8" } });
 }

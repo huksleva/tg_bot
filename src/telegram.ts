@@ -2,7 +2,7 @@ import type { Env } from "./env";
 
 // --- Минимальные типы Telegram, только то, что используем ---
 export interface User { id: number; first_name: string; username?: string }
-export interface Chat { id: number }
+export interface Chat { id: number; type?: string }
 export interface Message { message_id: number; from?: User; chat: Chat; text?: string }
 export interface CallbackQuery { id: string; from: User; message?: Message; data?: string }
 export interface Update { update_id: number; message?: Message; callback_query?: CallbackQuery }
@@ -14,7 +14,8 @@ export type ReplyKeyboard = {
   resize_keyboard?: boolean;
   is_persistent?: boolean;
 };
-export type Markup = InlineKeyboard | ReplyKeyboard;
+export type RemoveKeyboard = { remove_keyboard: true };
+export type Markup = InlineKeyboard | ReplyKeyboard | RemoveKeyboard;
 
 export class Telegram {
   private base: string;

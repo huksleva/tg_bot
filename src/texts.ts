@@ -19,6 +19,10 @@ export const HELP =
   "/id — твой Telegram ID\n" +
   "/help — эта справка";
 
+export const DENIED =
+  "Функционал ограничен. Отрок Батракан служит только своему господину — " +
+  "прав на команды у тебя нет.";
+
 export const UNKNOWN = "Не уразумел я, господине. Глянь /help";
 
 export const COMMANDS = [

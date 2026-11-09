@@ -91,7 +91,8 @@ export async function runCommute(ctx: Ctx) {
   if (plan.morningAt && !plan.morningSent && t >= plan.morningAt) {
     plan.morningSent = true;
     await savePlan(ctx, plan);
-    const subs = await ctx.store.listUniSubs();
+    const allowed = await ctx.loadAccess();
+    const subs = (await ctx.store.listUniSubs()).filter((id) => allowed.has(id));
     if (subs.length) {
       const body = await uniText(ctx).catch(() => "Прогноз транспорта сейчас недоступен.");
       const text = `<b>Первая пара в ${plan.start}. Пора выходить, господине.</b>\n\n${body}`;
@@ -105,7 +106,8 @@ export async function runCommute(ctx: Ctx) {
 
   plan.sent = true;
   await savePlan(ctx, plan); // сначала отмечаем, чтобы не прислать дважды
-  const subs = await ctx.store.listCommuteSubs();
+  const allowed = await ctx.loadAccess();
+  const subs = (await ctx.store.listCommuteSubs()).filter((id) => allowed.has(id));
   if (!subs.length) return;
   const text = await commuteMessage(ctx, `Пары кончились в ${plan.end}. Пора домой, господине.`);
   for (const chatId of subs) {
