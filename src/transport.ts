@@ -5,6 +5,7 @@ import ROUTES from "./routes.json";
 import TIMETABLE from "./timetable.json";
 import { mskHour, mskTime } from "./schedule";
 import { escapeHtml } from "./telegram";
+import { refineMetroTramForecast } from "./tram-gps";
 
 export const KIND_NAME: Record<StopKind, string> = { bus: "Автобус", tram: "Трамвай", trolley: "Троллейбус" };
 
@@ -21,16 +22,16 @@ export const KIND_NAME: Record<StopKind, string> = { bus: "Автобус", tram
  */
 
 /** Один вызов посредника. */
-async function relayOnce(env: Env, path: string): Promise<Response> {
+async function relayOnce(env: Env, path: string, timeoutMs = 16000): Promise<Response> {
   let res: Response;
   try {
     res = await fetch(`${env.RELAY_URL}?path=${encodeURIComponent(path)}`, {
       headers: { "X-Relay-Secret": env.RELAY_SECRET! },
-      signal: AbortSignal.timeout(16000), // посредник сдаётся максимум через ~14,5 с
+      signal: AbortSignal.timeout(timeoutMs),
     });
   } catch (e) {
     const name = (e as Error).name;
-    throw new Error(name === "TimeoutError" || name === "AbortError" ? "нет ответа за 16 с" : `нет связи: ${(e as Error).message}`);
+    throw new Error(name === "TimeoutError" || name === "AbortError" ? `нет ответа за ${timeoutMs / 1000} с` : `нет связи: ${(e as Error).message}`);
   }
   if (!res.ok) {
     const body = (await res.text().catch(() => "")).slice(0, 120);
@@ -70,6 +71,7 @@ export interface Vehicle {
   route: string; // номер маршрута, «47»
   at: number; // unix-время прибытия
   vehicle: string; // бортовой номер
+  gps?: true; // оценка по свежей позиции рядом с остановкой
 }
 
 /** «2026-11-07 01:39:42» по Москве -> unix. */
@@ -201,8 +203,10 @@ interface HomePlan {
   path: string;
 }
 
-const mins = (at: number) => Math.max(0, Math.round((at - Date.now() / 1000) / 60));
-const inMin = (at: number) => (mins(at) === 0 ? "прибывает" : `через ${mins(at)} мин`);
+function inMin(at: number, now: number) {
+  const minutes = Math.max(0, Math.round((at - now) / 60));
+  return minutes === 0 ? "прибывает" : `через ${minutes} мин`;
+}
 
 const METRO_BUS_STOP = 2068;
 const METRO_TRAM_STOP = 16644;
@@ -278,28 +282,29 @@ export async function compareOptions(ctx: Ctx, mode: "live" | "quick" = "live"):
   if (!stops.length) return "Остановок нет.";
   const hasRelay = ctx.env.RELAY_URL && ctx.env.RELAY_SECRET;
   const hasTram = stops.some((s) => s.orgp_id === METRO_TRAM_STOP && s.kind === "tram");
-  const transferForecast = mode === "live" && hasRelay && hasTram
+  const checkTrams = mode === "live" && hasRelay && hasTram;
+  const transferForecast = checkTrams
     ? fetchForecast(ctx.env, SHAVROVA_BUS_STOP).catch((error) => {
       console.error("Прогноз пересадки на ул. Шаврова", error);
       return null;
     })
     : Promise.resolve(null);
+  const tramGps = checkTrams
+    ? relayOnce(ctx.env, "/Portal/transport/internalapi/gtfs/realtime/vehicle?transports=tram", 4000)
+      .then((response) => response.arrayBuffer())
+      .catch((error) => {
+        console.warn("GPS трамваев", error);
+        return null;
+      })
+    : Promise.resolve(null);
 
-  const t = nowSec();
-  const plans: HomePlan[] = [];
-  const blocks = await Promise.all(stops.map(async (stop) => {
-    const routes = stop.routes.split(",");
-    const head = `<b>${escapeHtml(KIND_NAME[stop.kind] ?? stop.kind)} ${escapeHtml(routes.join(", "))}</b>` +
-      (stop.walk_min ? ` (идти ${stop.walk_min} мин)` : "");
-    if (!stop.orgp_id) return `${head}\nне задан номер для прогноза`;
-
+  const reports = await Promise.all(stops.map(async (stop) => {
     let live: Vehicle[] | null = null;
-    let noAnswer = "";
-    if (mode === "quick") {
+    let noAnswer = "живой прогноз недоступен";
+    if (mode === "quick" && stop.orgp_id) {
       live = await recentSnapshot(ctx, stop, 120);
-      if (live) live = live.filter((v) => v.at >= t);
       noAnswer = "загружаю живой прогноз…";
-    } else if (hasRelay) {
+    } else if (hasRelay && stop.orgp_id) {
       try {
         live = await fetchForecast(ctx.env, stop);
       } catch (e) {
@@ -307,12 +312,27 @@ export async function compareOptions(ctx: Ctx, mode: "live" | "quick" = "live"):
         console.error("Прогноз остановки", stop.id, failure);
         noAnswer = `сайт транспорта не ответил (${escapeHtml(failure)})`;
       }
-    } else {
-      noAnswer = "живой прогноз недоступен";
     }
-    const lastByRoute = await ctx.store.lastArrivals(stop.orgp_id);
+    const lastByRoute = stop.orgp_id ? await ctx.store.lastArrivals(stop.orgp_id) : new Map<string, number>();
+    return { stop, live, noAnswer, lastByRoute };
+  }));
+  const [transfer, gps] = await Promise.all([transferForecast, tramGps]);
+  const t = nowSec();
+  const plans: HomePlan[] = [];
+  const blocks = reports.map(({ stop, live, noAnswer, lastByRoute }) => {
+    const routes = stop.routes.split(",");
+    const head = `<b>${escapeHtml(KIND_NAME[stop.kind] ?? stop.kind)} ${escapeHtml(routes.join(", "))}</b>` +
+      (stop.walk_min ? ` (идти ${stop.walk_min} мин)` : "");
+    if (!stop.orgp_id) return `${head}\nне задан номер для прогноза`;
+    const metroTram = stop.orgp_id === METRO_TRAM_STOP && stop.kind === "tram";
+    if (metroTram && gps) {
+      try {
+        live = refineMetroTramForecast(live, gps, t);
+      } catch (error) {
+        console.warn("Формат GPS трамваев", error);
+      }
+    }
     const readyAt = t + stop.walk_min * 60; // раньше этого времени на остановку не успеть
-    const transfer = stop.orgp_id === METRO_TRAM_STOP ? await transferForecast : null;
 
     const lines = routes.map((route) => {
       const prefix = routes.length > 1 ? `${route}: ` : "";
@@ -323,14 +343,17 @@ export async function compareOptions(ctx: Ctx, mode: "live" | "quick" = "live"):
       let departure: Departure | undefined;
       let main: string;
       if (reachable.length) {
-        departure = { route, at: reachable[0].at, estimated: false };
-        main = reachable.slice(0, 3).map((v) => `${inMin(v.at)} (${mskTime(v.at)})`).join(", ");
+        departure = { route, at: reachable[0].at, estimated: reachable[0].gps === true };
+        main = reachable.slice(0, 3).map((v) => v.gps
+          ? `рядом по GPS (≈ ${mskTime(v.at)})`
+          : `${inMin(v.at, t)} (${mskTime(v.at)})`,
+        ).join(", ");
       } else {
         const est = estimate(stop, route, last, interval, readyAt);
         if (est !== null) {
           departure = { route, at: est, estimated: true };
           const how = last && interval && readyAt - last < 2 * interval * 60 ? "по интервалу" : "по расписанию";
-          main = `${live ? "живого прогноза нет" : noAnswer}, ≈ ${inMin(est)} (${how})`;
+          main = `${live ? "живого прогноза нет" : noAnswer}, ≈ ${inMin(est, t)} (${mskTime(est)}, ${how})`;
         } else {
           main = live ? "прогноза нет" : noAnswer;
         }
@@ -340,24 +363,27 @@ export async function compareOptions(ctx: Ctx, mode: "live" | "quick" = "live"):
       if (plan) {
         plans.push(plan);
         main += `\n${escapeHtml(plan.path)} → дома ${plan.estimated ? "≈ " : ""}в ${mskTime(plan.arrival)}`;
-      } else if (departure && stop.orgp_id === METRO_TRAM_STOP && ["47", "55"].includes(route)) {
+      } else if (departure && metroTram && ["47", "55"].includes(route)) {
         main += "\nПодходящего автобуса после трамвая не нашёл.";
       }
 
       const facts: string[] = [];
-      if (last && t - last < 90 * 60) facts.push(`был ${Math.max(0, Math.round((t - last) / 60))} мин назад`);
+      if (last && t - last < 90 * 60) {
+        facts.push(`последний отмеченный: ~${Math.max(0, Math.round((t - last) / 60))} мин назад`);
+      }
       if (interval) facts.push(`ходит каждые ~${interval} мин`);
       return `${prefix}${main}${facts.length ? `\n<i>${facts.join(", ")}</i>` : ""}`;
     });
-    const transferNote = stop.orgp_id === METRO_TRAM_STOP && stop.kind === "tram"
+    const transferNote = metroTram
       ? `\nПересадка у «Ул. Шаврова» на автобусы ${CHANGE_ROUTES.join(", ")}`
       : "";
     return `${head}${transferNote}\n${lines.join("\n")}`;
-  }));
+  });
 
   const best = plans.sort(byArrival)[0];
   const verdict = best
     ? `<b>Быстрее всего домой ${best.estimated ? "≈ " : ""}в ${mskTime(best.arrival)}</b>\n${escapeHtml(best.path)}.`
     : "Сейчас не удалось рассчитать время прибытия домой.";
-  return `${verdict}\n\n${blocks.join("\n\n")}`;
+  const updated = mode === "live" ? "Прогноз проверен" : "Предварительный расчёт";
+  return `${verdict}\n\n${blocks.join("\n\n")}\n\n<i>${updated} в ${mskTime(t)} МСК.</i>`;
 }
