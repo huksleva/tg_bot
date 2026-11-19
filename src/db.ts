@@ -11,6 +11,12 @@ const SCHEMA = [
   // Кому присылать «В вуз» перед первой парой
   `CREATE TABLE IF NOT EXISTS uni_subs (
      chat_id INTEGER PRIMARY KEY)`,
+  // Последний день, когда чат запросил маршрут или получил уведомление о нём
+  `CREATE TABLE IF NOT EXISTS commute_views (
+     chat_id INTEGER NOT NULL,
+     direction TEXT NOT NULL,
+     day TEXT NOT NULL,
+     PRIMARY KEY (chat_id, direction))`,
   // Служебные значения бота
   `CREATE TABLE IF NOT EXISTS settings (
      key TEXT PRIMARY KEY,
@@ -59,6 +65,8 @@ export async function ensureSchema(db: D1Database) {
 }
 
 export type StopKind = "bus" | "tram" | "trolley";
+export type CommuteDirection = "home" | "uni";
+
 export interface Stop {
   id: number;
   kind: StopKind;
@@ -101,6 +109,23 @@ export class Store {
 
   async pruneArrivals(before: number) {
     await this.db.prepare("DELETE FROM arrivals WHERE at < ?").bind(before).run();
+  }
+
+  async hasCommuteView(chatId: number, direction: CommuteDirection, day: string) {
+    const row = await this.db.prepare(
+      "SELECT 1 FROM commute_views WHERE chat_id = ? AND direction = ? AND day >= ?",
+    ).bind(chatId, direction, day).first();
+    return row !== null;
+  }
+
+  /** Возвращает true, только если этот маршрут ещё не открывали в указанную дату. */
+  async recordCommuteView(chatId: number, direction: CommuteDirection, day: string) {
+    const result = await this.db.prepare(
+      `INSERT INTO commute_views (chat_id, direction, day) VALUES (?, ?, ?)
+       ON CONFLICT (chat_id, direction) DO UPDATE SET day = excluded.day
+       WHERE excluded.day > commute_views.day`,
+    ).bind(chatId, direction, day).run();
+    return result.meta.changes > 0;
   }
 
   // --- Подписка на сообщение перед парами ---

@@ -5,6 +5,7 @@ import { BTN, mainMenu } from "./keyboards";
 import { Telegram, escapeHtml, type CallbackQuery, type Message, type Update } from "./telegram";
 import { DENIED, HELP, UNKNOWN, WELCOME } from "./texts";
 import { parseCommand } from "./utils";
+import { homeTemperature } from "./weather";
 
 export const parseIds = (s: string | null | undefined) =>
   (s ?? "").split(",").map((x) => x.trim()).filter((x) => /^\d+$/.test(x)).map(Number);
@@ -92,7 +93,6 @@ async function onMessage(ctx: Ctx, msg: Message) {
 
   // Знаки перед словом отбрасываем, чтобы работали и старые кнопки со смайликами
   const menuText = text.replace(/^[^\p{L}]+/u, "");
-  const isMenu = (Object.values(BTN) as string[]).includes(menuText);
 
   // Пошагового ввода в боте больше нет — незаконченный ввод от старых версий просто сбрасываем
   if (await ctx.store.getState(userId)) await ctx.store.setState(userId, null);
@@ -102,6 +102,7 @@ async function onMessage(ctx: Ctx, msg: Message) {
     case BTN.home: return showHome(ctx, chatId);
     case BTN.uni: return showUniScreen(ctx, chatId);
     case BTN.schedule: return showSchedule(ctx, chatId);
+    case BTN.temperature: return void (await ctx.tg.send(chatId, await homeTemperature(), mainMenu));
     case BTN.help: return void (await ctx.tg.send(chatId, HELP, mainMenu));
   }
 
@@ -121,6 +122,8 @@ async function onMessage(ctx: Ctx, msg: Message) {
       return showUniScreen(ctx, chatId);
     case "schedule":
       return showSchedule(ctx, chatId, args === "завтра" || args === "tomorrow" ? 1 : 0);
+    case "temperature":
+      return void (await ctx.tg.send(chatId, await homeTemperature(), mainMenu));
     case "help":
       return void (await ctx.tg.send(chatId, HELP, mainMenu));
     case "id":

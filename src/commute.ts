@@ -1,4 +1,5 @@
 import type { Ctx } from "./bot";
+import type { CommuteDirection } from "./db";
 import type { InlineKeyboard } from "./telegram";
 import { fetchDay, fetchLessons, humanDate, mskDate, mskHour, mskTime, mskToUnix } from "./schedule";
 import { escapeHtml } from "./telegram";
@@ -12,7 +13,7 @@ export const COMMUTE = {
   /** Через сколько минут после конца последней пары присылать сообщение */
   offsetMin: 30,
   /** За сколько минут до начала первой пары присылать «В вуз» (выход из дома) */
-  leaveBeforeMin: 62,
+  leaveBeforeMin: 57,
   /** С какого часа (по Москве) загружать расписание на сегодня */
   planFromHour: 6,
 };
@@ -23,13 +24,14 @@ interface Plan {
   notifyAt: number | null; // когда прислать сообщение
   sent?: boolean;
   start?: string | null; // начало первой пары
-  morningAt?: number | null; // когда прислать «В вуз»
   morningSent?: boolean;
 }
 
 const planKey = (date: string) => `commute:plan:${date}`;
 const retryKey = "commute:retry_at";
 const now = () => Math.floor(Date.now() / 1000);
+const morningTime = (plan: Plan) =>
+  plan.start ? mskToUnix(plan.date, plan.start) - COMMUTE.leaveBeforeMin * 60 : null;
 
 async function loadPlan(ctx: Ctx, date: string): Promise<Plan | null> {
   const raw = await ctx.store.getSetting(planKey(date));
@@ -47,13 +49,13 @@ async function buildPlan(ctx: Ctx, date: string): Promise<Plan> {
         end: day.end,
         notifyAt: mskToUnix(date, day.end) + COMMUTE.offsetMin * 60,
         start: day.start,
-        morningAt: mskToUnix(date, day.start) - COMMUTE.leaveBeforeMin * 60,
       }
-    : { date, end: null, notifyAt: null, start: null, morningAt: null };
+    : { date, end: null, notifyAt: null, start: null };
   // Если план составлен уже после времени сообщения (например, бот задеплоен вечером) —
   // не присылаем задним числом
   if (plan.notifyAt && plan.notifyAt < now() - 30 * 60) plan.sent = true;
-  if (plan.morningAt && plan.morningAt < now() - 30 * 60) plan.morningSent = true;
+  const morningAt = morningTime(plan);
+  if (morningAt !== null && morningAt < now() - 30 * 60) plan.morningSent = true;
   await savePlan(ctx, plan);
   return plan;
 }
@@ -88,30 +90,41 @@ export async function runCommute(ctx: Ctx) {
   }
 
   // Утром — «В вуз» за leaveBeforeMin до первой пары
-  if (plan.morningAt && !plan.morningSent && t >= plan.morningAt) {
+  const morningAt = morningTime(plan);
+  if (morningAt !== null && !plan.morningSent && t >= morningAt) {
     plan.morningSent = true;
     await savePlan(ctx, plan);
-    const allowed = await ctx.loadAccess();
-    const subs = (await ctx.store.listUniSubs()).filter((id) => allowed.has(id));
-    if (subs.length) {
+    await notifySubscribers(ctx, date, "uni", await ctx.store.listUniSubs(), uniRefreshKb, async () => {
       const body = await uniText(ctx).catch(() => "Прогноз транспорта сейчас недоступен.");
-      const text = `<b>Первая пара в ${plan.start}. Пора выходить, господине.</b>\n\n${body}`;
-      for (const chatId of subs) {
-        await ctx.tg.send(chatId, text, uniRefreshKb).catch((e) => console.error("uni send", chatId, e));
-      }
-    }
+      return `<b>Первая пара в ${plan.start}. Пора выходить, господине.</b>\n\n${body}`;
+    });
   }
 
   if (!plan.notifyAt || plan.sent || t < plan.notifyAt) return;
 
   plan.sent = true;
   await savePlan(ctx, plan); // сначала отмечаем, чтобы не прислать дважды
+  const header = `Пары кончились в ${plan.end}. Пора домой, господине.`;
+  await notifySubscribers(ctx, date, "home", await ctx.store.listCommuteSubs(), refreshKb,
+    () => commuteMessage(ctx, header));
+}
+
+async function notifySubscribers(
+  ctx: Ctx, date: string, direction: CommuteDirection, subscribers: number[], kb: InlineKeyboard,
+  makeText: () => Promise<string>,
+) {
   const allowed = await ctx.loadAccess();
-  const subs = (await ctx.store.listCommuteSubs()).filter((id) => allowed.has(id));
-  if (!subs.length) return;
-  const text = await commuteMessage(ctx, `Пары кончились в ${plan.end}. Пора домой, господине.`);
-  for (const chatId of subs) {
-    await ctx.tg.send(chatId, text, refreshKb).catch((e) => console.error("commute send", chatId, e));
+  const pending: number[] = [];
+  for (const chatId of subscribers) {
+    if (allowed.has(chatId) && !(await ctx.store.hasCommuteView(chatId, direction, date))) pending.push(chatId);
+  }
+  if (!pending.length) return;
+  const text = await makeText();
+  for (const chatId of pending) {
+    // Ручной запрос мог прийти, пока загружался прогноз. Запись также защищает от двух запусков cron.
+    if (await ctx.store.recordCommuteView(chatId, direction, date)) {
+      await ctx.tg.send(chatId, text, kb).catch((e) => console.error("commute send", direction, chatId, e));
+    }
   }
 }
 
@@ -147,8 +160,11 @@ async function homeText(ctx: Ctx, chatId: number, mode: "live" | "quick" = "live
   try {
     const plan = await todayPlan(ctx);
     if (!plan.end) planLine = "Сегодня пар нет.";
-    else if (plan.sent) planLine = `Сегодня пары до ${plan.end}.`;
-    else planLine = `Сегодня пары до ${plan.end}, напомню в ${mskTime(plan.notifyAt!)}.`;
+    else if (plan.sent || await ctx.store.hasCommuteView(chatId, "home", plan.date)) {
+      planLine = `Сегодня пары до ${plan.end}.`;
+    } else {
+      planLine = `Сегодня пары до ${plan.end}, напомню в ${mskTime(plan.notifyAt!)}.`;
+    }
   } catch {
     planLine = "Расписание сейчас не загрузилось.";
   }
@@ -164,6 +180,7 @@ async function homeText(ctx: Ctx, chatId: number, mode: "live" | "quick" = "live
  * потом то же сообщение обновляется свежим прогнозом с сайта транспорта.
  */
 export async function showHome(ctx: Ctx, chatId: number) {
+  await ctx.store.recordCommuteView(chatId, "home", mskDate(now()));
   const quick = await homeText(ctx, chatId, "quick");
   const sent = await ctx.tg.send(chatId, quick.text, quick.kb);
   const full = await homeText(ctx, chatId, "live");
@@ -174,6 +191,7 @@ export async function showHome(ctx: Ctx, chatId: number) {
 export async function onHomeCallback(ctx: Ctx, data: string, chatId: number, messageId: number, cbId: string) {
   if (data === "home:on") await ctx.store.setCommuteSub(chatId, true);
   if (data === "home:off") await ctx.store.setCommuteSub(chatId, false);
+  if (data === "home:refresh") await ctx.store.recordCommuteView(chatId, "home", mskDate(now()));
   await ctx.tg.answer(
     cbId,
     data === "home:on" ? "Буду присылать" : data === "home:off" ? "Не буду присылать" : "Обновляю прогноз…",
@@ -230,21 +248,27 @@ export async function onScheduleCallback(ctx: Ctx, data: string, chatId: number,
 
 // ---------------- Дорога в вуз ----------------
 
-async function uniPlanLine(ctx: Ctx) {
+async function uniPlanLine(ctx: Ctx, chatId: number) {
   try {
     const plan = await todayPlan(ctx);
-    if (!plan.start || !plan.morningAt) return "Сегодня пар нет.";
-    if (plan.morningSent || now() > plan.morningAt) return `Сегодня первая пара была в ${plan.start}.`;
-    return `Сегодня первая пара в ${plan.start}, напомню в ${mskTime(plan.morningAt)}.`;
+    const morningAt = morningTime(plan);
+    if (!plan.start || morningAt === null) return "Сегодня пар нет.";
+    if (now() >= mskToUnix(plan.date, plan.start)) return `Сегодня первая пара была в ${plan.start}.`;
+    if (plan.morningSent || await ctx.store.hasCommuteView(chatId, "uni", plan.date)) {
+      return `Сегодня первая пара в ${plan.start}.`;
+    }
+    return `Сегодня первая пара в ${plan.start}, напомню в ${mskTime(morningAt)}.`;
   } catch {
     return "Расписание сейчас не загрузилось.";
   }
 }
 
 export async function showUniScreen(ctx: Ctx, chatId: number) {
-  await showUni(ctx, chatId, await uniPlanLine(ctx), COMMUTE.leaveBeforeMin);
+  await ctx.store.recordCommuteView(chatId, "uni", mskDate(now()));
+  await showUni(ctx, chatId, await uniPlanLine(ctx, chatId), COMMUTE.leaveBeforeMin);
 }
 
 export async function onUniScreenCallback(ctx: Ctx, data: string, chatId: number, messageId: number, cbId: string) {
-  await onUniCallback(ctx, data, chatId, messageId, cbId, await uniPlanLine(ctx), COMMUTE.leaveBeforeMin);
+  if (data === "uni:refresh") await ctx.store.recordCommuteView(chatId, "uni", mskDate(now()));
+  await onUniCallback(ctx, data, chatId, messageId, cbId, await uniPlanLine(ctx, chatId), COMMUTE.leaveBeforeMin);
 }

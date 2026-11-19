@@ -222,7 +222,7 @@ function uniKb(subscribed: boolean): InlineKeyboard {
 async function screen(ctx: Ctx, chatId: number, mode: "live" | "quick", planLine: string, leadMin: number) {
   const subscribed = await ctx.store.isUniSub(chatId);
   const body = await uniText(ctx, mode);
-  const auto = `Сообщение за ${Math.floor(leadMin / 60)} ч ${leadMin % 60} мин до первой пары: <b>${subscribed ? "включено" : "выключено"}</b>.`;
+  const auto = `Сообщение за ${leadMin} мин до первой пары: <b>${subscribed ? "включено" : "выключено"}</b>.`;
   return {
     text: `<b>В вуз: до ${TO_UNI.goal}</b>\n\n${body}\n\n${planLine}\n${auto}`,
     kb: uniKb(subscribed),

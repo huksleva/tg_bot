@@ -8,8 +8,6 @@ import { escapeHtml } from "./telegram";
 
 export const KIND_NAME: Record<StopKind, string> = { bus: "Автобус", tram: "Трамвай", trolley: "Троллейбус" };
 
-const stopTitle = (s: Stop) => `${KIND_NAME[s.kind] ?? s.kind} ${s.routes.split(",").join(", ")} — ${s.name}`;
-
 /**
  * Прогноз прибытия транспорта Петербурга.
  *
@@ -191,15 +189,73 @@ export function nextScheduled(stop: Stop, route: string, after: number): number 
 
 // ---------------- Сравнение вариантов ----------------
 
-interface Option {
-  stop: Stop;
+interface Departure {
   route: string;
   at: number;
-  estimated: boolean; // true — оценка, а не живой прогноз
+  estimated: boolean;
+}
+
+interface HomePlan {
+  arrival: number;
+  estimated: boolean;
+  path: string;
 }
 
 const mins = (at: number) => Math.max(0, Math.round((at - Date.now() / 1000) / 60));
 const inMin = (at: number) => (mins(at) === 0 ? "прибывает" : `через ${mins(at)} мин`);
+
+const METRO_BUS_STOP = 2068;
+const METRO_TRAM_STOP = 16644;
+const CHANGE_WALK_MIN = 2;
+const HOME_BUSES = {
+  "258": { stop: "Плесецкая ул.", walk: 4 },
+  "171": { stop: "Глухарская ул.", walk: 7 },
+};
+const CHANGE_ROUTES = ["258", "171"] as const;
+const SHAVROVA_BUS_STOP: Stop = {
+  id: 0,
+  kind: "bus",
+  name: "Ул. Шаврова",
+  routes: CHANGE_ROUTES.join(","),
+  walk_min: 0,
+  orgp_id: 27010,
+};
+
+/** Последний участок домой, с временем в салоне по GTFS и пешим подходом. */
+function busHome(route: keyof typeof HOME_BUSES, at: number, ride: number, estimated: boolean): HomePlan {
+  const { stop, walk } = HOME_BUSES[route];
+  return {
+    arrival: at + (ride + walk) * 60,
+    estimated,
+    path: `автобус ${route} в ${mskTime(at)} → ${stop} в ${mskTime(at + ride * 60)} → ${walk} мин пешком`,
+  };
+}
+
+function homePlan(stop: Stop, dep: Departure, transfer: Vehicle[] | null): HomePlan | null {
+  if (stop.orgp_id === METRO_BUS_STOP && stop.kind === "bus" && dep.route === "258") {
+    return busHome("258", dep.at, 18, dep.estimated);
+  }
+  if (stop.orgp_id !== METRO_TRAM_STOP || stop.kind !== "tram" || !["47", "55"].includes(dep.route)) return null;
+
+  const off = dep.at + 10 * 60;
+  const readyAt = off + CHANGE_WALK_MIN * 60;
+  const scheduledFrom = Math.ceil(readyAt / 60) * 60;
+  const plans: HomePlan[] = [];
+  for (const route of CHANGE_ROUTES) {
+    const live = transfer?.find((v) => v.route === route && v.at >= readyAt);
+    const at = live?.at ?? nextScheduled(SHAVROVA_BUS_STOP, route, scheduledFrom);
+    if (at !== null) plans.push(busHome(route, at, 7, !live));
+  }
+  const best = plans.sort(byArrival)[0];
+  return best ? {
+    arrival: best.arrival,
+    estimated: dep.estimated || best.estimated,
+    path: `трамвай ${dep.route} в ${mskTime(dep.at)} → Ул. Шаврова в ${mskTime(off)} → ` +
+      `${CHANGE_WALK_MIN} мин на пересадку → ${best.path}`,
+  } : null;
+}
+
+const byArrival = (a: HomePlan, b: HomePlan) => a.arrival - b.arrival || Number(a.estimated) - Number(b.estimated);
 
 /** Оценка следующего прибытия без живого прогноза: последний + интервал, иначе расписание. */
 function estimate(stop: Stop, route: string, last: number | undefined, interval: number | null, readyAt: number) {
@@ -222,13 +278,17 @@ function estimate(stop: Stop, route: string, last: number | undefined, interval:
 export async function compareOptions(ctx: Ctx, mode: "live" | "quick" = "live"): Promise<string> {
   const stops = await ctx.store.listStops();
   if (!stops.length) return "Остановок нет.";
-  if (!ctx.env.RELAY_URL || !ctx.env.RELAY_SECRET) {
-    return stops.map((s) => `— ${escapeHtml(stopTitle(s))}`).join("\n") +
-      "\n\nПрогноз недоступен: не настроен посредник (RELAY_URL, RELAY_SECRET).";
-  }
+  const hasRelay = ctx.env.RELAY_URL && ctx.env.RELAY_SECRET;
+  const hasTram = stops.some((s) => s.orgp_id === METRO_TRAM_STOP && s.kind === "tram");
+  const transferForecast = mode === "live" && hasRelay && hasTram
+    ? fetchForecast(ctx.env, SHAVROVA_BUS_STOP).catch((error) => {
+      console.error("Прогноз пересадки на ул. Шаврова", error);
+      return null;
+    })
+    : Promise.resolve(null);
 
   const t = nowSec();
-  const options: Option[] = [];
+  const plans: HomePlan[] = [];
   const blocks = await Promise.all(stops.map(async (stop) => {
     const routes = stop.routes.split(",");
     const head = `<b>${escapeHtml(KIND_NAME[stop.kind] ?? stop.kind)} ${escapeHtml(routes.join(", "))}</b>` +
@@ -241,7 +301,7 @@ export async function compareOptions(ctx: Ctx, mode: "live" | "quick" = "live"):
       live = await recentSnapshot(ctx, stop, 120);
       if (live) live = live.filter((v) => v.at >= t);
       noAnswer = "загружаю живой прогноз…";
-    } else {
+    } else if (hasRelay) {
       try {
         live = await fetchForecast(ctx.env, stop);
       } catch (e) {
@@ -249,9 +309,12 @@ export async function compareOptions(ctx: Ctx, mode: "live" | "quick" = "live"):
         console.error("Прогноз остановки", stop.id, failure);
         noAnswer = `сайт транспорта не ответил (${escapeHtml(failure)})`;
       }
+    } else {
+      noAnswer = "живой прогноз недоступен";
     }
     const lastByRoute = await ctx.store.lastArrivals(stop.orgp_id);
     const readyAt = t + stop.walk_min * 60; // раньше этого времени на остановку не успеть
+    const transfer = stop.orgp_id === METRO_TRAM_STOP ? await transferForecast : null;
 
     const lines = routes.map((route) => {
       const prefix = routes.length > 1 ? `${route}: ` : "";
@@ -259,19 +322,28 @@ export async function compareOptions(ctx: Ctx, mode: "live" | "quick" = "live"):
       const last = lastByRoute.get(route);
       const reachable = (live ?? []).filter((v) => v.route === route && v.at >= readyAt);
 
+      let departure: Departure | undefined;
       let main: string;
       if (reachable.length) {
-        options.push({ stop, route, at: reachable[0].at, estimated: false });
+        departure = { route, at: reachable[0].at, estimated: false };
         main = reachable.slice(0, 3).map((v) => `${inMin(v.at)} (${mskTime(v.at)})`).join(", ");
       } else {
         const est = estimate(stop, route, last, interval, readyAt);
-        if (est) {
-          options.push({ stop, route, at: est, estimated: true });
+        if (est !== null) {
+          departure = { route, at: est, estimated: true };
           const how = last && interval && readyAt - last < 2 * interval * 60 ? "по интервалу" : "по расписанию";
           main = `${live ? "живого прогноза нет" : noAnswer}, ≈ ${inMin(est)} (${how})`;
         } else {
           main = live ? "прогноза нет" : noAnswer;
         }
+      }
+
+      const plan = departure ? homePlan(stop, departure, transfer) : null;
+      if (plan) {
+        plans.push(plan);
+        main += `\n${escapeHtml(plan.path)} → дома ${plan.estimated ? "≈ " : ""}в ${mskTime(plan.arrival)}`;
+      } else if (departure && stop.orgp_id === METRO_TRAM_STOP && ["47", "55"].includes(route)) {
+        main += "\nПодходящего автобуса после трамвая не нашёл.";
       }
 
       const facts: string[] = [];
@@ -282,12 +354,9 @@ export async function compareOptions(ctx: Ctx, mode: "live" | "quick" = "live"):
     return `${head}\n${lines.join("\n")}`;
   }));
 
-  // Лучший вариант: раньше всех окажешься в транспорте. Живой прогноз при равенстве важнее.
-  options.sort((a, b) => a.at - b.at || Number(a.estimated) - Number(b.estimated));
-  const best = options[0];
+  const best = plans.sort(byArrival)[0];
   const verdict = best
-    ? `<b>Быстрее всего${best.estimated ? " (оценка)" : ""}: ${escapeHtml((KIND_NAME[best.stop.kind] ?? best.stop.kind).toLowerCase())} ${best.route}, ` +
-      `${best.estimated ? "≈ " : ""}${mins(best.at) === 0 ? "уже прибывает" : `через ${mins(best.at)} мин`}.</b>`
-    : "Прогноза прибытия сейчас нет — транспорт не ходит или не передаёт данные.";
+    ? `<b>Быстрее всего домой ${best.estimated ? "≈ " : ""}в ${mskTime(best.arrival)}</b>\n${escapeHtml(best.path)}.`
+    : "Сейчас не удалось рассчитать время прибытия домой.";
   return `${verdict}\n\n${blocks.join("\n\n")}`;
 }
