@@ -206,12 +206,12 @@ const inMin = (at: number) => (mins(at) === 0 ? "прибывает" : `чере
 
 const METRO_BUS_STOP = 2068;
 const METRO_TRAM_STOP = 16644;
-const CHANGE_WALK_MIN = 2;
 const HOME_BUSES = {
-  "258": { stop: "Плесецкая ул.", walk: 4 },
-  "171": { stop: "Глухарская ул.", walk: 7 },
+  "258": { stop: "Плесецкая ул.", ride: 7, walk: 4 },
+  "171": { stop: "Глухарская ул.", ride: 7, walk: 7 },
+  "182": { stop: "Глухарская ул., 5", ride: 6, walk: 7 },
 };
-const CHANGE_ROUTES = ["258", "171"] as const;
+const CHANGE_ROUTES = ["258", "171", "182"] as const;
 const SHAVROVA_BUS_STOP: Stop = {
   id: 0,
   kind: "bus",
@@ -222,7 +222,7 @@ const SHAVROVA_BUS_STOP: Stop = {
 };
 
 /** Последний участок домой, с временем в салоне по GTFS и пешим подходом. */
-function busHome(route: keyof typeof HOME_BUSES, at: number, ride: number, estimated: boolean): HomePlan {
+function busHome(route: keyof typeof HOME_BUSES, at: number, estimated: boolean, ride = HOME_BUSES[route].ride): HomePlan {
   const { stop, walk } = HOME_BUSES[route];
   return {
     arrival: at + (ride + walk) * 60,
@@ -233,25 +233,23 @@ function busHome(route: keyof typeof HOME_BUSES, at: number, ride: number, estim
 
 function homePlan(stop: Stop, dep: Departure, transfer: Vehicle[] | null): HomePlan | null {
   if (stop.orgp_id === METRO_BUS_STOP && stop.kind === "bus" && dep.route === "258") {
-    return busHome("258", dep.at, 18, dep.estimated);
+    return busHome("258", dep.at, dep.estimated, 18);
   }
   if (stop.orgp_id !== METRO_TRAM_STOP || stop.kind !== "tram" || !["47", "55"].includes(dep.route)) return null;
 
   const off = dep.at + 10 * 60;
-  const readyAt = off + CHANGE_WALK_MIN * 60;
-  const scheduledFrom = Math.ceil(readyAt / 60) * 60;
+  const scheduledFrom = Math.ceil(off / 60) * 60;
   const plans: HomePlan[] = [];
   for (const route of CHANGE_ROUTES) {
-    const live = transfer?.find((v) => v.route === route && v.at >= readyAt);
+    const live = transfer?.find((v) => v.route === route && v.at >= off);
     const at = live?.at ?? nextScheduled(SHAVROVA_BUS_STOP, route, scheduledFrom);
-    if (at !== null) plans.push(busHome(route, at, 7, !live));
+    if (at !== null) plans.push(busHome(route, at, !live));
   }
   const best = plans.sort(byArrival)[0];
   return best ? {
     arrival: best.arrival,
     estimated: dep.estimated || best.estimated,
-    path: `трамвай ${dep.route} в ${mskTime(dep.at)} → Ул. Шаврова в ${mskTime(off)} → ` +
-      `${CHANGE_WALK_MIN} мин на пересадку → ${best.path}`,
+    path: `трамвай ${dep.route} в ${mskTime(dep.at)} → Ул. Шаврова в ${mskTime(off)} → ${best.path}`,
   } : null;
 }
 
@@ -351,7 +349,10 @@ export async function compareOptions(ctx: Ctx, mode: "live" | "quick" = "live"):
       if (interval) facts.push(`ходит каждые ~${interval} мин`);
       return `${prefix}${main}${facts.length ? `\n<i>${facts.join(", ")}</i>` : ""}`;
     });
-    return `${head}\n${lines.join("\n")}`;
+    const transferNote = stop.orgp_id === METRO_TRAM_STOP && stop.kind === "tram"
+      ? `\nПересадка у «Ул. Шаврова» на автобусы ${CHANGE_ROUTES.join(", ")}`
+      : "";
+    return `${head}${transferNote}\n${lines.join("\n")}`;
   }));
 
   const best = plans.sort(byArrival)[0];
