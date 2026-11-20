@@ -13,6 +13,7 @@
     "wrangler": "^4.158.0"
   },
   "dependencies": {
-    "gtfs-realtime-bindings": "^2.2.0"
+    "gtfs-realtime-bindings": "^2.2.0",
+    "protobufjs": "8.8.1"
   }
 }
